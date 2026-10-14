@@ -234,8 +234,8 @@ step 1 and pass an Anthropic API key from a repository secret in both
 workflows instead:
 
 ```yaml
-    secrets:
-      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+secrets:
+  anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 The review then authenticates with the key instead of the federation.
