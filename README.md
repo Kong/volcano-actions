@@ -108,7 +108,8 @@ verdict is an error and the head needs a human review. An approval of that
 exact commit by a collaborator with write access other than the author stands
 in for the review and passes both statuses; an approval of an earlier commit
 does not, since nobody read the new one. A verdict with findings still takes a
-fix or the override label.
+fix or the override label. A run whose `start` job fails reviews nothing and
+publishes no verdict, so the head waits for a re-run.
 
 When it waits, the review requests one collaborator by name: the first
 reviewer's pick among the people with write access and recent commits to the

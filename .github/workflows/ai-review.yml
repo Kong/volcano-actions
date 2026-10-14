@@ -11,7 +11,8 @@
 # history in the changed files. ai-review-human.yml re-sets it when reviews or
 # that label change. Reviewers that do not complete leave the verdict to those
 # that did; when none does, the verdict is an error and the head waits for a
-# person.
+# person. A run that reviews nothing, because start skipped the head or
+# failed, publishes no verdict.
 #
 # To add a provider, add a job like `claude` and `codex`, list it in
 # `verdict.needs`, and add its credential secret to workflow_call.
