@@ -192,3 +192,35 @@ test('publish with no reviewer, or none that completed, errors the verdict and f
     assert.deepEqual(c.set(humanStatusContext), [[sha, 'pending', 'Needs human review: No AI review completed.']]);
   }
 });
+
+// A job-level `if` sees every ancestor's result, so start's success runs the
+// verdict job on a run where start skipped the review or that was cancelled.
+test('publish sets nothing when every review was skipped or cancelled', async (t) => {
+  clearAfter(t, 'REVIEWS', 'REVIEW_OUTPUTS');
+  delete process.env.REVIEW_OUTPUTS;
+  for (const results of [
+    ['skipped', 'skipped'],
+    ['cancelled', 'cancelled'],
+    ['skipped', 'cancelled'],
+  ]) {
+    process.env.REVIEWS = JSON.stringify({ claude: job(results[0], {}), codex: job(results[1], {}) });
+    const c = client();
+    const k = core();
+    await publish({ github: c.github, context: context(), core: k });
+    assert.deepEqual(c.calls, [], results.join());
+    assert.deepEqual(k.failures, [], results.join());
+    assert.deepEqual(k.warnings, [], results.join());
+    assert.deepEqual(k.notices, ['Publishing no verdict for abcdef1: every AI review was skipped or cancelled.']);
+  }
+
+  // A reviewer that ran and failed still errors the verdict.
+  process.env.REVIEWS = JSON.stringify({ claude: job('skipped', {}), codex: job('failure', {}) });
+  const c = client();
+  const k = core();
+  await publish({ github: c.github, context: context(), core: k });
+  assert.deepEqual(
+    c.set(statusContext).map(([, state]) => state),
+    ['error'],
+  );
+  assert.deepEqual(k.failures, [`No AI review produced a verdict for ${sha}.`]);
+});

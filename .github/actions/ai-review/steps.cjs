@@ -172,6 +172,14 @@ async function postFindings({ github, context, core }, reviewers) {
 // head, then the summary comment, then each review's inline comments.
 async function publish({ github, context, core }) {
   const pr = context.payload.pull_request;
+  const { reviewers, candidates } = reviewersOf(process.env.REVIEWS, process.env.REVIEW_OUTPUTS);
+  // A job-level `if` sees every ancestor's result in `needs`, so start's
+  // success runs this job when start skipped the review or the run was
+  // cancelled. The head keeps whatever status start left it.
+  if (reviewers.length > 0 && reviewers.every((r) => ['skipped', 'cancelled'].includes(r.result))) {
+    core.notice(`Publishing no verdict for ${pr.head.sha.slice(0, 7)}: every AI review was skipped or cancelled.`);
+    return;
+  }
   const pull = await livePull(github, context);
   if (pull.state !== 'open' && (await headReviewedElsewhere(github, context))) {
     core.notice(
@@ -179,7 +187,6 @@ async function publish({ github, context, core }) {
     );
     return;
   }
-  const { reviewers, candidates } = reviewersOf(process.env.REVIEWS, process.env.REVIEW_OUTPUTS);
   // A job that failed has no output to read, but one that succeeded should.
   for (const reviewer of reviewers) {
     if (reviewer.result === 'success' && reviewer.unread) {
