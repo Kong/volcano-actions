@@ -187,6 +187,7 @@ test('the codex job refuses bots outside allowed_bots, as the claude job does', 
   assert.equal(runs('renovate[bot]', listed), 1);
   assert.equal(runs('dependabot', listed), 1);
   assert.equal(runs('renovate[bot]', ' * '), 0);
+  assert.equal(runs('renovate[bot]', 'dependabot[bot],\nrenovate[bot]\n'), 0);
   assert.equal(runs('renovate[bot]', ''), 1);
 });
 
