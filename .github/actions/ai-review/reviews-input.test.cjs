@@ -38,16 +38,25 @@ test('every job in needs is a reviewer, named by its output or its job ID, in th
     mistral: { result: 'cancelled' },
     other: job('success', { reviewer: '  ' }),
   };
-  assert.deepEqual(reviewersOf(JSON.stringify(needs), outputsDir(t, { claude: 'x' })), {
-    reviewers: [
-      { name: 'Codex', model: '', result: 'failure', output: '' },
-      { name: 'Claude', model: 'claude-opus-5-5', result: 'success', output: 'x' },
-      { name: 'Gemini', model: '', result: 'skipped', output: '' },
-      { name: 'Mistral', model: '', result: 'cancelled', output: '' },
-      { name: 'Other', model: '', result: 'success', output: '' },
-    ],
-    candidates: '["bob"]',
-  });
+  const { reviewers, candidates } = reviewersOf(JSON.stringify(needs), outputsDir(t, { claude: 'x' }));
+  // Only the job with a file has no reason it was not read.
+  assert.deepEqual(
+    reviewers.map((r) => /ENOENT/u.test(r.unread)),
+    [true, false, true, true, true],
+  );
+  assert.deepEqual(
+    { reviewers: reviewers.map(({ name, model, result, output }) => ({ name, model, result, output })), candidates },
+    {
+      reviewers: [
+        { name: 'Codex', model: '', result: 'failure', output: '' },
+        { name: 'Claude', model: 'claude-opus-5-5', result: 'success', output: 'x' },
+        { name: 'Gemini', model: '', result: 'skipped', output: '' },
+        { name: 'Mistral', model: '', result: 'cancelled', output: '' },
+        { name: 'Other', model: '', result: 'success', output: '' },
+      ],
+      candidates: '["bob"]',
+    },
+  );
   for (const raw of [undefined, '', 'not json', 'null', '[]', '7', '{"a":null}']) {
     assert.deepEqual(reviewersOf(raw, outputsDir(t, { a: 'x' })), { reviewers: [], candidates: '' }, String(raw));
   }
@@ -66,6 +75,8 @@ test("each reviewer's output is its job's file, never a job output", (t) => {
   assert.deepEqual(outputs(dir), ['x', '', '']);
   // A failed download leaves no directory.
   for (const at of [undefined, '', path.join(dir, 'missing')]) assert.deepEqual(outputs(at), ['', '', ''], String(at));
+  assert.equal(reviewersOf(needs, '').reviewers[0].unread, 'no directory holds ai-review-claude.json');
+  assert.match(reviewersOf(needs, dir).reviewers[1].unread, /EISDIR/u);
 });
 
 test("reviewer candidates come from the first reviewer that found any, as each job's output", () => {
@@ -120,9 +131,13 @@ test('a reviewer job that succeeded without a readable output did not complete',
     const k = core();
     await publish({ github: c.github, context: context(), core: k });
     assert.deepEqual(k.failures, [], json);
-    assert.deepEqual(
-      k.warnings,
-      ['The Claude review of abcdef1 did not complete, so the verdict rests on Codex.'],
+    // The run log says why the file was missing, which a bad download layout would cause.
+    const unread = json ? [] : [/^Could not read the Claude review's output: ENOENT/u];
+    assert.equal(k.warnings.length, unread.length + 1, json);
+    unread.forEach((pattern, i) => assert.match(k.warnings[i], pattern, json));
+    assert.equal(
+      k.warnings.at(-1),
+      'The Claude review of abcdef1 did not complete, so the verdict rests on Codex.',
       json,
     );
     assert.deepEqual(

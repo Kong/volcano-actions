@@ -180,6 +180,12 @@ async function publish({ github, context, core }) {
     return;
   }
   const { reviewers, candidates } = reviewersOf(process.env.REVIEWS, process.env.REVIEW_OUTPUTS);
+  // A job that failed has no output to read, but one that succeeded should.
+  for (const reviewer of reviewers) {
+    if (reviewer.result === 'success' && reviewer.unread) {
+      core.warning(`Could not read the ${reviewer.name} review's output: ${reviewer.unread}`);
+    }
+  }
   const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
   // The status goes first so a failed comment cannot leave the head pending.
   await setStatus(github, context, pr.head.sha, result.state, result.description);

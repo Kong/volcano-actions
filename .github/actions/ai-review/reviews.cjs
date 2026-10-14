@@ -18,13 +18,14 @@ function cap(text, max) {
 // where the verdict job downloads the job's artifact of that name. It travels
 // as a file because an environment variable holds at most 128 KiB, and a
 // provider without maxLength can write more. A missing or unreadable file
-// reads as no output, so that review did not complete.
+// reads as no output, so that review did not complete; `unread` says why.
 function outputOf(dir, id) {
-  if (!dir) return '';
+  const name = `ai-review-${id}.json`;
+  if (!dir) return { output: '', unread: `no directory holds ${name}` };
   try {
-    return fs.readFileSync(path.join(dir, `ai-review-${id}.json`), 'utf8');
-  } catch {
-    return '';
+    return { output: fs.readFileSync(path.join(dir, name), 'utf8') };
+  } catch (error) {
+    return { output: '', unread: error.message };
   }
 }
 
@@ -51,7 +52,7 @@ function reviewersOf(raw, dir) {
       name: text(job.outputs?.reviewer) || `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
       model: text(job.outputs?.model),
       result: job.result,
-      output: outputOf(dir, id),
+      ...outputOf(dir, id),
     })),
     candidates: jobs.find(([, job]) => job.outputs?.candidates)?.[1].outputs.candidates ?? '',
   };
