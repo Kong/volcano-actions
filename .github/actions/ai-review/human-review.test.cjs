@@ -184,7 +184,7 @@ test('a person is asked to decide the reasons, not to review the code again', as
   const cleared = await publishQuestion();
   assert.ok(
     cleared.includes(
-      `\n- Should the task role write every queue?\n\nClaude found no P0-P2 problems at abcdef1, so the code needs no second review for bugs. ${ask}\n\n`,
+      `\n- Should the task role write every queue?\n\nThe AI review found no P0-P2 problems at abcdef1, so the code needs no second review for bugs. ${ask}\n\n`,
     ),
   );
   assert.equal(marked(cleared), true);

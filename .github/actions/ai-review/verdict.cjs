@@ -11,50 +11,21 @@ const {
   code,
   joinNames,
 } = require('./constants.cjs');
-const {
-  cap,
-  humanReasons,
-  clearsCode,
-  suggestedReviewer,
-  severityOf,
-  parseReview,
-  completed,
-} = require('./reviews.cjs');
+const { humanReasons, clearsCode, suggestedReviewer, severityOf, parsed, completed } = require('./reviews.cjs');
+const { shape, union } = require('./combine.cjs');
 
 const heading = 'AI review';
 const noneCompleted = 'No AI review completed.';
+// Says what the review could not verify, so a person checks only that. It
+// holds while the review jobs only read the checkout and leave inline
+// comments; the workflow tests pin each reviewer's tools.
+const readOnly =
+  "**Not checked:** The AI review read the diff, the code, and the PR's text; it ran no tests or builds and read nothing outside this repository.";
 
-// How the comment presents the reviews. With one reviewer it reads as that
-// reviewer's alone; with several, each item says whose it is and lists are
-// merged without repeats.
-const single = {
-  tag: () => '',
-  summary: (entry) => clean(cap(entry.review.summary, 1500)),
-  merge: (lists) => lists.flat().slice(0, 5),
-};
-const several = {
-  tag: (name) => ` (${name})`,
-  summary: (entry) => `**${entry.name}:** ${clean(cap(entry.review.summary, 1500))}`,
-  merge: (lists) => [...new Set(lists.flat())].slice(0, 5),
-};
-
-// Says what the reviews could not verify, so a person checks only that. The
-// first line holds while the review jobs only read the checkout and leave
-// inline comments; the workflow tests pin each reviewer's tools.
-function notChecked(done, style) {
-  const names = done.map((entry) => entry.name);
-  const items = done.map((entry) =>
-    (Array.isArray(entry.review.not_checked) ? entry.review.not_checked : [])
-      .filter((n) => typeof n === 'string' && n.trim())
-      .map((n) => `- ${clean(cap(n.trim(), 200))}`),
-  );
-  return [
-    names.length > 1
-      ? `**Not checked:** ${joinNames(names)} read the diff, the code, and the PR's text; they ran no tests or builds and read nothing outside this repository.`
-      : `**Not checked:** ${names[0]} read the diff, the code, and the PR's text; it ran no tests or builds and read nothing outside this repository.`,
-    ...style.merge(items),
-  ];
-}
+// Lists from several reviewers merge without repeats; one reviewer's stay as
+// it wrote them.
+const listsFor = (count) =>
+  count > 1 ? (lists) => [...new Set(lists.flat())].slice(0, 5) : (lists) => lists.flat().slice(0, 5);
 
 // The summary must not keep showing an earlier head's verdict.
 function incompleteVerdict(short, url, candidates, missed) {
@@ -75,78 +46,74 @@ function incompleteVerdict(short, url, candidates, missed) {
   };
 }
 
-// The comment's findings, most severe first, and what the reviews could not check.
-function findingsBody({ done, missed, findings, blocking, short, url, style }) {
-  const item = ({ f, by }) => {
-    const file = cap(String(f.path), 300);
-    return `- ${code(f.line > 0 ? `${file}:${f.line}` : file)} ${clean(cap(String(f.title), 200))}${style.tag(by)}`;
-  };
+const blockingIn = (findings) => findings.filter((f) => failing.has(f.severity));
+
+// The comment's findings, most severe first, and what the review could not
+// check, all from the one review it shows.
+function findingsBody({ shown, failed, notChecked, short, url }) {
+  const item = (f) => `- ${code(f.line > 0 ? `${f.path}:${f.line}` : f.path)} ${clean(f.title)}`;
   const body = [
     marker,
-    blocking.length > 0 ? `### ${heading}: ${blocking.length} P0-P2 finding(s)` : `### ${heading}: no P0-P2 findings`,
+    failed
+      ? `### ${heading}: ${blockingIn(shown.findings).length} P0-P2 finding(s)`
+      : `### ${heading}: no P0-P2 findings`,
     '',
     `Reviewed ${short}. [Run log](${url})`,
-    ...missed.flatMap((name) => ['', `${name} review did not complete. [Run log](${url})`]),
     '',
-    done.map((entry) => style.summary(entry)).join('\n\n'),
+    clean(shown.summary),
   ];
   for (const [level, label] of Object.entries(severities)) {
-    const at = findings.filter(({ f }) => severityOf(f) === level);
-    if (at.length > 0) body.push('', `**${label}**`, ...at.map((x) => item(x)));
+    const at = shown.findings.filter((f) => f.severity === level);
+    if (at.length > 0) body.push('', `**${label}**`, ...at.map((f) => item(f)));
   }
-  body.push('', ...notChecked(done, style));
+  body.push('', readOnly, ...notChecked.map((n) => `- ${clean(n)}`));
   return body;
 }
 
-// Reviews that did not complete leave the verdict to those that did, and the
-// status says so.
-function describe({ done, missed, findings, blocking }) {
-  const names = done.map((entry) => entry.name);
-  const only = missed.length > 0 ? `${joinNames(names)} only; ${joinNames(missed)} did not complete` : '';
-  if (blocking.length > 0) {
-    return fit(`${blocking.length} P0-P2 finding(s)${only && ` (${only})`}. See the ${heading} comment.`);
-  }
-  const count = (level) => findings.filter(({ f }) => severityOf(f) === level).length;
-  return fit(`No P0-P2 findings (${count('p3')} P3, ${count('pre_existing')} pre-existing${only && `; ${only}`}).`);
+// Counts the findings the comment shows, so the status and comment agree.
+function describe(failed, findings) {
+  if (failed) return fit(`${blockingIn(findings).length} P0-P2 finding(s). See the ${heading} comment.`);
+  const count = (level) => findings.filter((f) => f.severity === level).length;
+  return fit(`No P0-P2 findings (${count('p3')} P3, ${count('pre_existing')} pre-existing).`);
 }
 
 // Turns the reviewers' results and structured output, as
 // [{ name, result, output }], into one status and comment, the reasons, if
-// any, that the head needs a person's review, and who to ask for it.
-function verdict(reviewers, sha, url, candidates = []) {
+// any, that the head needs a person's review, and who to ask for it. The
+// comment shows one review: the only one that completed, `merged` (see
+// merge.cjs), or else every review's findings without repeats. The state, the
+// need for a person, and whether the code is cleared come from the reviews
+// themselves, so a merge can change how the review reads but never what it
+// decides. Reviewer names stay out of everything this returns but `by` and
+// `missed`, which only the run log shows.
+function verdict(reviewers, sha, url, candidates = [], merged = null) {
   const short = sha.slice(0, 7);
-  const entries = reviewers.map(({ name, result, output }) => ({ name, result, review: parseReview(output) }));
-  const style = entries.length > 1 ? several : single;
+  const entries = parsed(reviewers);
+  const list = listsFor(entries.length);
   const done = entries.filter((entry) => completed(entry.result, entry.review));
   const missed = entries.filter((entry) => !done.includes(entry)).map((entry) => entry.name);
   if (done.length === 0) return incompleteVerdict(short, url, candidates, missed);
-  const findings = done.flatMap((entry) => entry.review.findings.map((f) => ({ f, by: entry.name })));
-  const blocking = findings.filter(({ f }) => failing.has(severityOf(f)));
-  const parts = { done, missed, findings, blocking, short, url, style };
-  const body = findingsBody(parts);
+  const reviews = done.map((entry) => entry.review);
+  const blocking = reviews.flatMap((r) => r.findings).filter((f) => failing.has(severityOf(f)));
+  const failed = blocking.length > 0;
+  const shown = reviews.length === 1 ? shape(reviews[0]) : (merged ?? union(reviews));
+  const body = findingsBody({ shown, failed, notChecked: list([shown.notChecked]), short, url });
+  const asked = list(reviews.map((r) => humanReasons(r)));
   const decision = {
-    reasons: style.merge(done.map((entry) => humanReasons(entry))),
-    reviewer: suggestedReviewer(done, candidates),
+    reasons: asked.length > 0 && shown.reasons?.length > 0 ? shown.reasons : asked,
+    reviewer: suggestedReviewer(reviews, candidates),
     by: joinNames(done.map((entry) => entry.name)),
     missed,
   };
-  if (blocking.length > 0) {
+  const description = describe(failed, shown.findings);
+  if (failed) {
     body.push(
       '',
       `Push a fix, or have a collaborator with write access (including the PR author) add the \`${overrideLabel}\` label to accept ${short} as is. An override also needs a human review.`,
     );
-    return { state: 'failure', description: describe(parts), body: body.join('\n'), ...decision };
+    return { state: 'failure', description, body: body.join('\n'), ...decision };
   }
-  return {
-    state: 'success',
-    description: describe(parts),
-    body: body.join('\n'),
-    ...decision,
-    cleared: clearsCode(
-      done.map((entry) => entry.review),
-      blocking,
-    ),
-  };
+  return { state: 'success', description, body: body.join('\n'), ...decision, cleared: clearsCode(reviews, blocking) };
 }
 
 module.exports = { verdict };

@@ -5,8 +5,8 @@ const test = require('node:test');
 const { marker, verdict, globRegExp } = require('./ai-review.cjs');
 const { readRepo, sha, url, finding, output, routine } = require('./test-helpers.cjs');
 
-// The verdict when Claude is the only reviewer, which reads as it did before
-// the review took several, apart from the AI review's names.
+// The verdict when Claude is the only reviewer, which reads as one AI review
+// with no reviewer named.
 const claude = (result, raw, candidates) => verdict([{ name: 'Claude', result, output: raw }], sha, url, candidates);
 
 test('a failed, empty, or malformed review is an error that replaces the summary', () => {
@@ -89,7 +89,7 @@ test('P0, P1, and P2 findings fail the verdict', () => {
     failing.body,
     /a collaborator with write access \(including the PR author\) add the `ai-review-override` label to accept abcdef1 as is/u,
   );
-  // Sections run from most to least severe, whatever order Claude reported.
+  // Sections run from most to least severe, whatever order the review reported.
   assert.deepEqual(failing.body.match(/\*\*[🔴🟠🟡⚪🟣] [A-Za-z0-9-]+\*\*/gu), [
     '**🔴 P0**',
     '**🟠 P1**',
@@ -127,12 +127,12 @@ test('the review decides whether a person must review, failing closed', () => {
     'Changes billing.',
     'Adds a table.',
   ]);
-  assert.deepEqual(reasonsFor({ needed: true, reasons: [] }), ['Claude asked for a human review.']);
+  assert.deepEqual(reasonsFor({ needed: true, reasons: [] }), ['The AI review asked for a human review.']);
   assert.equal(reasonsFor({ needed: true, reasons: Array.from({ length: 9 }, () => 'Reason.') }).length, 5);
   for (const human of [undefined, { needed: 'no', reasons: [] }, { reasons: [] }, 'no']) {
     assert.deepEqual(
       reasonsFor(human),
-      ['Claude did not say whether this needs a human review.'],
+      ['The AI review did not say whether this needs a human review.'],
       JSON.stringify(human),
     );
   }
@@ -162,7 +162,7 @@ test('globs match repository-relative paths', () => {
   }
 });
 
-test("the suggested reviewer is Claude's pick from the candidates, or the one with the most history", () => {
+test("the suggested reviewer is the review's pick from the candidates, or the one with the most history", () => {
   const pick = (reviewer, reviewer_reason = 'wrote internal/billing', candidates = ['alice', 'bob']) =>
     claude(
       'success',
@@ -171,7 +171,7 @@ test("the suggested reviewer is Claude's pick from the candidates, or the one wi
     ).reviewer;
   assert.deepEqual(pick('bob'), { login: 'bob', why: 'wrote internal/billing' });
   assert.deepEqual(pick(' @Bob '), { login: 'bob', why: 'wrote internal/billing' });
-  assert.deepEqual(pick('bob', ''), { login: 'bob', why: 'Claude suggested them' });
+  assert.deepEqual(pick('bob', ''), { login: 'bob', why: 'the AI review suggested them' });
   for (const reviewer of ['mallory', '', undefined, 7]) {
     assert.deepEqual(
       pick(reviewer),
@@ -187,11 +187,11 @@ test("the suggested reviewer is Claude's pick from the candidates, or the one wi
   });
 });
 
-test('the summary says what Claude could not check', () => {
+test('the summary says what the review could not check', () => {
   const body = (notChecked, findings = []) =>
     claude('success', JSON.stringify({ summary: 's', findings, human_review: routine, not_checked: notChecked })).body;
   const ran =
-    "**Not checked:** Claude read the diff, the code, and the PR's text; it ran no tests or builds and read nothing outside this repository.";
+    "**Not checked:** The AI review read the diff, the code, and the PR's text; it ran no tests or builds and read nothing outside this repository.";
   assert.ok(body().endsWith(`\n\n${ran}`));
   assert.ok(
     body([' Whether @kong/infra merged #63 first. ', '', 7]).endsWith(

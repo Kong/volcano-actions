@@ -50,15 +50,15 @@ const ownReasons = (review) =>
 
 // Anything but an explicit `needed: false` asks for a person, so a missing or
 // malformed decision fails closed without discarding the findings.
-function humanReasons({ name, review }) {
+function humanReasons(review) {
   const decision = review?.human_review;
   if (decision?.needed === false) return [];
   const reasons = ownReasons(review);
   if (reasons.length > 0) return reasons;
   return [
     decision?.needed === true
-      ? `${name} asked for a human review.`
-      : `${name} did not say whether this needs a human review.`,
+      ? 'The AI review asked for a human review.'
+      : 'The AI review did not say whether this needs a human review.',
   ];
 }
 
@@ -74,20 +74,20 @@ const clearsCode = (reviews, blocking) =>
 
 // A reviewer's pick when it is one of the candidates the workflow found, so
 // the PR cannot steer the request.
-function pickOf({ name, review }, candidates) {
+function pickOf(review, candidates) {
   const decision = review?.human_review;
   const pick = typeof decision?.reviewer === 'string' ? decision.reviewer.trim().replace(/^@/u, '').toLowerCase() : '';
   const login = candidates.find((c) => c.toLowerCase() === pick);
   if (!login) return null;
   const why = typeof decision.reviewer_reason === 'string' ? decision.reviewer_reason.trim().slice(0, 200) : '';
-  return { login, why: why || `${name} suggested them` };
+  return { login, why: why || 'the AI review suggested them' };
 }
 
-// The first reviewer's pick among the candidates, in reviewer order;
-// otherwise the candidate with the most history in the changed files.
-function suggestedReviewer(done, candidates) {
-  for (const entry of done) {
-    const pick = pickOf(entry, candidates);
+// The first review's pick among the candidates, in reviewer order; otherwise
+// the candidate with the most history in the changed files.
+function suggestedReviewer(reviews, candidates) {
+  for (const review of reviews) {
+    const pick = pickOf(review, candidates);
     if (pick) return pick;
   }
   return candidates.length > 0 ? { login: candidates[0], why: 'most recent history in the changed files' } : null;
@@ -115,6 +115,16 @@ const completed = (result, review) =>
   Array.isArray(review?.findings) &&
   review.findings.every((f) => Object.hasOwn(severities, severityOf(f)));
 
+// Each reviewer as [{ name, result, review }], with its structured output parsed.
+const parsed = (reviewers) =>
+  reviewers.map(({ name, result, output }) => ({ name, result, review: parseReview(output) }));
+
+// The structured outputs of the reviews that completed, in reviewer order.
+const completedReviews = (reviewers) =>
+  parsed(reviewers)
+    .filter((entry) => completed(entry.result, entry.review))
+    .map((entry) => entry.review);
+
 module.exports = {
   cap,
   reviewersOf,
@@ -122,6 +132,7 @@ module.exports = {
   clearsCode,
   suggestedReviewer,
   severityOf,
-  parseReview,
+  parsed,
   completed,
+  completedReviews,
 };

@@ -17,7 +17,8 @@ const {
 } = require('./github.cjs');
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
-const { reviewersOf } = require('./reviews.cjs');
+const { reviewersOf, completedReviews } = require('./reviews.cjs');
+const { mergeReviews } = require('./merge.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
 // the same head. Without one, it still publishes, so a reopen finds a verdict.
@@ -92,16 +93,12 @@ async function publishSummary({ github, context, core }, result, decision) {
   }
 }
 
-// Fails the job only when no review completed. One that did not complete
-// leaves the verdict to the others, which the run shows as a warning.
+// Names each review that did not complete, which only the run log does, and
+// fails the job only when none completed: otherwise the rest decide.
 function reportIncomplete(core, sha, result) {
-  if (result.state === 'error') {
-    core.setFailed(`No AI review produced a verdict for ${sha}.`);
-    return;
-  }
-  for (const name of result.missed) {
-    core.warning(`The ${name} review of ${sha.slice(0, 7)} did not complete, so the verdict is ${result.by}'s alone.`);
-  }
+  const rest = result.state === 'error' ? '' : `, so the verdict rests on ${result.by}`;
+  for (const name of result.missed) core.warning(`The ${name} review of ${sha.slice(0, 7)} did not complete${rest}.`);
+  if (result.state === 'error') core.setFailed(`No AI review produced a verdict for ${sha}.`);
 }
 
 // Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
@@ -116,14 +113,16 @@ async function publish({ github, context, core }) {
     return;
   }
   const { reviewers, candidates } = reviewersOf(process.env.REVIEWS);
-  const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
+  // The merge never throws: without one, the comment combines the reviews itself.
+  const merged = await mergeReviews(completedReviews(reviewers), core);
+  const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates), merged);
   // The status goes first so a failed comment cannot leave the head pending.
   await setStatus(github, context, pr.head.sha, result.state, result.description);
   reportIncomplete(core, pr.head.sha, result);
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
   const paths = await pathReasons(github, context, pr.number);
-  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer, by: result.by };
+  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer };
   let live = null;
   try {
     live = await liveReasons(github, context, pull, pr.head.sha);

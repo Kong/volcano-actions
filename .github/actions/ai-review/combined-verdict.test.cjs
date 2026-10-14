@@ -5,7 +5,8 @@ const test = require('node:test');
 const { marker, verdict } = require('./ai-review.cjs');
 const { sha, url, finding, routine, reviewJson } = require('./test-helpers.cjs');
 
-// The verdict from Claude's and Codex's results, given as [result, output].
+// The verdict from Claude's and Codex's results, given as [result, output],
+// with no merge, so the comment combines the reviews itself.
 const pair = (claude, codex, candidates = []) =>
   verdict(
     [
@@ -20,15 +21,15 @@ const pair = (claude, codex, candidates = []) =>
 const both = (claude, codex, candidates = ['alice', 'bob']) =>
   pair(['success', reviewJson(claude)], ['success', reviewJson(codex)], candidates);
 const asks = (reasons, reviewer = '', why = '') => ({ needed: true, reasons, reviewer, reviewer_reason: why });
-const ranBoth =
-  "**Not checked:** Claude and Codex read the diff, the code, and the PR's text; they ran no tests or builds and read nothing outside this repository.";
+const ran =
+  "**Not checked:** The AI review read the diff, the code, and the PR's text; it ran no tests or builds and read nothing outside this repository.";
 
-test('two passing reviews make one AI review that says whose each item is', () => {
+test('two passing reviews read as one AI review, with the first summary and no names', () => {
   const v = both(
     { findings: [finding('p3')], notChecked: ['Staging.'] },
     {
       summary: 'Caches lookups.',
-      findings: [finding('pre_existing', { path: 'docs/a.md', line: 0 })],
+      findings: [finding('pre_existing', { path: 'docs/a.md', line: 0 }), finding('P3', { title: 'nil map write.' })],
       notChecked: ['Staging.', 'Load.'],
     },
   );
@@ -36,28 +37,28 @@ test('two passing reviews make one AI review that says whose each item is', () =
   assert.equal(v.description, 'No P0-P2 findings (1 P3, 1 pre-existing).');
   assert.ok(
     v.body.startsWith(
-      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. [Run log](${url})\n\n**Claude:** Adds a cache.\n\n**Codex:** Caches lookups.\n`,
+      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. [Run log](${url})\n\nAdds a cache.\n\n**⚪ P3**\n- \`internal/a.go:12\` Nil map write\n\n**🟣 Pre-existing**\n- \`docs/a.md\` Nil map write\n`,
     ),
   );
-  assert.match(v.body, /\*\*⚪ P3\*\*\n- `internal\/a.go:12` Nil map write \(Claude\)\n/u);
-  assert.match(v.body, /\*\*🟣 Pre-existing\*\*\n- `docs\/a.md` Nil map write \(Codex\)\n/u);
-  assert.ok(v.body.endsWith(`\n\n${ranBoth}\n- Staging.\n- Load.`));
-  assert.equal(v.by, 'Claude and Codex');
-  assert.deepEqual(v.missed, []);
+  assert.ok(v.body.endsWith(`\n\n${ran}\n- Staging.\n- Load.`));
+  assert.doesNotMatch(v.body, /Claude|Codex|Caches lookups/u);
+  assert.deepEqual([v.by, v.missed], ['Claude and Codex', []]);
 });
 
-test('a P0-P2 finding from either review fails the verdict', () => {
-  for (const [claude, codex] of [
-    [[finding('p1')], [finding('p3')]],
-    [[finding('p3')], [finding('p0')]],
-    [[finding('p2')], [finding('p2', { title: 'Unchecked error' })]],
+test('a P0-P2 finding from either review fails the verdict, counted once however many reported it', () => {
+  for (const [claude, codex, n] of [
+    [[finding('p1')], [finding('p3')], 1],
+    [[finding('p3')], [finding('p0')], 1],
+    [[finding('p2')], [finding('p2', { title: 'Unchecked error' })], 2],
+    [[finding('p1')], [finding('p1', { title: ' nil MAP write ' })], 1],
+    // The same problem at different severities stays twice without a merge.
+    [[finding('p1')], [finding('p2')], 2],
   ]) {
     const v = both({ findings: claude }, { findings: codex });
-    const n = [...claude, ...codex].filter((f) => f.severity !== 'p3').length;
     assert.equal(v.state, 'failure', JSON.stringify([claude, codex]));
     assert.equal(v.description, `${n} P0-P2 finding(s). See the AI review comment.`);
     assert.ok(v.body.startsWith(`${marker}\n### AI review: ${n} P0-P2 finding(s)\n`));
-    assert.ok(v.body.includes(`\n\n${ranBoth}\n\nPush a fix`));
+    assert.ok(v.body.includes(`\n\n${ran}\n\nPush a fix`));
     assert.match(v.body, /add the `ai-review-override` label to accept abcdef1 as is/u);
   }
 });
@@ -68,19 +69,19 @@ test('either review can ask for a person, and their reasons and gaps merge witho
     { human: asks(['Changes billing.', 'Drops a column.', 'D.', 'E.']), notChecked: ['C.', 'D.', 'E.', 'F.'] },
   );
   assert.deepEqual(v.reasons, ['Changes billing.', 'Adds a table.', 'Drops a column.', 'D.', 'E.']);
-  assert.ok(v.body.endsWith(`\n\n${ranBoth}\n- A.\n- B.\n- C.\n- D.\n- E.`));
+  assert.ok(v.body.endsWith(`\n\n${ran}\n- A.\n- B.\n- C.\n- D.\n- E.`));
   assert.deepEqual(both({}, { human: asks(['Changes billing.']) }).reasons, ['Changes billing.']);
-  assert.deepEqual(both({ human: asks([]) }, {}).reasons, ['Claude asked for a human review.']);
-  assert.deepEqual(both({}, { human: null }).reasons, ['Codex did not say whether this needs a human review.']);
+  assert.deepEqual(both({ human: asks([]) }, { human: asks([]) }).reasons, ['The AI review asked for a human review.']);
+  assert.deepEqual(both({}, { human: null }).reasons, ['The AI review did not say whether this needs a human review.']);
   assert.deepEqual(both({}, {}).reasons, []);
 });
 
-test("the suggested reviewer is Claude's pick, then Codex's, then the one with the most history", () => {
+test("the suggested reviewer is the first review's pick, then the next's, then the one with the most history", () => {
   const picks = (claude, codex, candidates) =>
     both({ human: asks(['x'], ...claude) }, { human: asks(['x'], ...codex) }, candidates).reviewer;
   assert.deepEqual(picks(['bob', 'wrote billing'], ['alice', 'owns it']), { login: 'bob', why: 'wrote billing' });
   assert.deepEqual(picks(['mallory', 'x'], ['alice', 'owns it']), { login: 'alice', why: 'owns it' });
-  assert.deepEqual(picks([''], [' @Bob ']), { login: 'bob', why: 'Codex suggested them' });
+  assert.deepEqual(picks([''], [' @Bob ']), { login: 'bob', why: 'the AI review suggested them' });
   assert.deepEqual(picks(['mallory'], ['eve']), { login: 'alice', why: 'most recent history in the changed files' });
   assert.equal(picks(['bob'], ['alice'], []), null);
 });
@@ -106,36 +107,26 @@ test('the code is cleared only when every review read it closely and asks a pers
   }
 });
 
-test('a review that did not complete leaves the verdict to the other, without blocking or a reason', () => {
+test('a review that did not complete leaves the verdict to the other, and only the run log says so', () => {
   const codexOnly = pair(
     ['failure', ''],
-    ['success', reviewJson({ findings: [finding('p3')], notChecked: ['Load.'] })],
+    ['success', reviewJson({ summary: 'Caches lookups.', findings: [finding('p3')], notChecked: ['Load.'] })],
   );
   assert.equal(codexOnly.state, 'success');
-  assert.equal(codexOnly.description, 'No P0-P2 findings (1 P3, 0 pre-existing; Codex only; Claude did not complete).');
+  assert.equal(codexOnly.description, 'No P0-P2 findings (1 P3, 0 pre-existing).');
   assert.ok(
     codexOnly.body.startsWith(
-      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. [Run log](${url})\n\nClaude review did not complete. [Run log](${url})\n\n**Codex:** Adds a cache.\n`,
+      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. [Run log](${url})\n\nCaches lookups.\n\n**⚪ P3**\n`,
     ),
   );
-  assert.match(codexOnly.body, / Nil map write \(Codex\)\n/u);
-  assert.ok(
-    codexOnly.body.endsWith(
-      "\n\n**Not checked:** Codex read the diff, the code, and the PR's text; it ran no tests or builds and read nothing outside this repository.\n- Load.",
-    ),
-  );
+  assert.ok(codexOnly.body.endsWith(`\n\n${ran}\n- Load.`));
+  assert.doesNotMatch(codexOnly.body, /Claude|Codex|did not complete/u);
   assert.deepEqual([codexOnly.reasons, codexOnly.missed, codexOnly.by], [[], ['Claude'], 'Codex']);
 
   const claudeOnly = pair(['success', reviewJson({ findings: [finding('p1')] })], ['failure', '']);
   assert.equal(claudeOnly.state, 'failure');
-  assert.equal(
-    claudeOnly.description,
-    '1 P0-P2 finding(s) (Claude only; Codex did not complete). See the AI review comment.',
-  );
-  assert.match(
-    claudeOnly.body,
-    /\n\nCodex review did not complete\. \[Run log\]\(.*\)\n\n\*\*Claude:\*\* Adds a cache\.\n/u,
-  );
+  assert.equal(claudeOnly.description, '1 P0-P2 finding(s). See the AI review comment.');
+  assert.doesNotMatch(claudeOnly.body, /Claude|Codex|did not complete/u);
   assert.deepEqual(claudeOnly.reasons, []);
   for (const output of ['', 'not json', JSON.stringify({ findings: [] }), reviewJson({ findings: [finding('nit')] })]) {
     const v = pair(['success', reviewJson()], ['success', output]);
@@ -155,18 +146,16 @@ test('neither review completing is an error that waits for a person', () => {
   assert.deepEqual(v.missed, ['Claude', 'Codex']);
 });
 
-test("untrusted Codex text is capped at the lengths Claude's schema allows", () => {
-  const v = both(
-    {},
-    {
-      summary: 's'.repeat(1501),
-      findings: [finding('p3', { title: 't'.repeat(201), path: 'p'.repeat(301) })],
-      human: asks(['r'.repeat(201)], 'bob', 'w'.repeat(250)),
-      notChecked: ['n'.repeat(201)],
-    },
-  );
-  assert.ok(v.body.includes(`\n\n**Codex:** ${'s'.repeat(1499)}…\n`));
-  assert.ok(v.body.includes(`\n- \`${'p'.repeat(299)}…:12\` ${'t'.repeat(199)}… (Codex)\n`));
+test('untrusted text is capped at the lengths the schema allows', () => {
+  const long = {
+    summary: 's'.repeat(1501),
+    findings: [finding('p3', { title: 't'.repeat(201), path: 'p'.repeat(301) })],
+    human: asks(['r'.repeat(201)], 'bob', 'w'.repeat(250)),
+    notChecked: ['n'.repeat(201)],
+  };
+  const v = both(long, {});
+  assert.ok(v.body.includes(`\n\n${'s'.repeat(1499)}…\n`));
+  assert.ok(v.body.includes(`\n- \`${'p'.repeat(299)}…:12\` ${'t'.repeat(199)}…\n`));
   assert.ok(v.body.endsWith(`\n- ${'n'.repeat(199)}…`));
   assert.deepEqual(v.reasons, [`${'r'.repeat(199)}…`]);
   assert.deepEqual(v.reviewer, { login: 'bob', why: 'w'.repeat(200) });
