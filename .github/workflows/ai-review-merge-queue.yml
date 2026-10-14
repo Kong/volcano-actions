@@ -1,12 +1,12 @@
-# Reports the `claude-review/verdict` and `claude-review/human` statuses that
-# claude-review.yml gates PRs on for merge-group commits. Each queued PR passed
+# Reports the `ai-review/verdict` and `ai-review/human` statuses that
+# ai-review.yml gates PRs on for merge-group commits. Each queued PR passed
 # both on its head to enter the queue, so the merge-group commit passes without
 # another review.
-# Callers run this from a merge_group workflow apart from their
-# claude-review.yml caller, so merge-group runs hold only `statuses: write` and
-# never receive the API key.
+# Callers run this from a merge_group workflow apart from their ai-review.yml
+# caller, so merge-group runs hold only `statuses: write` and never receive
+# the API keys.
 
-name: Claude Review (merge queue)
+name: AI Review (merge queue)
 
 on:
   workflow_call:
@@ -29,7 +29,7 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.merge_group.head_sha }}
         run: |
-          for status in claude-review/verdict claude-review/human; do
+          for status in ai-review/verdict ai-review/human; do
             for attempt in 1 2 3 4 5; do
               gh api "repos/$REPO/statuses/$SHA" -f state=success -f context="$status" \
                 -f description="Each queued PR passed review on its head." > /dev/null && break

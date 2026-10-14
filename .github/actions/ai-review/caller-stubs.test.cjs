@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { overrideLabel, humanLabel } = require('./claude-review.cjs');
+const { overrideLabel, humanLabel } = require('./ai-review.cjs');
 const { readRepo } = require('./test-helpers.cjs');
 
 test('the documented label descriptions fit GitHub limits', () => {
@@ -20,13 +20,13 @@ test('the documented label descriptions fit GitHub limits', () => {
 // skipped runs cannot hide the review's checks on the PR page.
 test('the caller stubs grant what the review needs and set no concurrency', () => {
   const stubs = {
-    'pr-claude-review.yml': {
-      name: 'Claude Review',
-      job: 'claude-review',
+    'pr-ai-review.yml': {
+      name: 'AI Review',
+      job: 'ai-review',
       types: 'opened, synchronize, reopened, ready_for_review',
     },
-    'pr-claude-review-retarget-override.yml': {
-      name: 'Claude Review (retarget and override)',
+    'pr-ai-review-retarget-override.yml': {
+      name: 'AI Review (retarget and override)',
       job: 'retarget-or-override',
       types: 'edited, labeled',
       if: `github.event.changes.base || github.event.label.name == '${overrideLabel}'`,
@@ -48,7 +48,7 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
     assert.match(
       stub,
       new RegExp(
-        `\njobs:\n {2}${want.job}:\n${ifLine} {4}uses: Kong/volcano-actions/\\.github/workflows/claude-review\\.yml@main\n`,
+        `\njobs:\n {2}${want.job}:\n${ifLine} {4}uses: Kong/volcano-actions/\\.github/workflows/ai-review\\.yml@main\n`,
         'u',
       ),
       file,
@@ -70,8 +70,8 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
 // token, and its completion runs the gate from the default branch.
 test('the human gate stubs run the gate from the base for reviews and its label', () => {
   const readme = readRepo('README.md').replaceAll(/^ {3}/gmu, '');
-  const approvals = readRepo('.github/workflows/pr-claude-review-approvals.yml');
-  const human = readRepo('.github/workflows/pr-claude-review-human.yml');
+  const approvals = readRepo('.github/workflows/pr-ai-review-approvals.yml');
+  const human = readRepo('.github/workflows/pr-ai-review-human.yml');
   for (const stub of [approvals, human]) {
     const shown = stub.slice(stub.indexOf('\nname: ') + 1);
     assert.ok(readme.includes(shown.trim()), shown.split('\n')[0]);
@@ -91,7 +91,7 @@ test('the human gate stubs run the gate from the base for reviews and its label'
   assert.match(human, /\n {2}pull_request_target:\n {4}branches: \[main\]\n {4}types: \[labeled, unlabeled\]\n/u);
   assert.ok(
     human.includes(
-      `\njobs:\n  human-gate:\n    if: github.event_name == 'workflow_run' || github.event.label.name == '${humanLabel}'\n    uses: Kong/volcano-actions/.github/workflows/claude-review-human.yml@main\n`,
+      `\njobs:\n  human-gate:\n    if: github.event_name == 'workflow_run' || github.event.label.name == '${humanLabel}'\n    uses: Kong/volcano-actions/.github/workflows/ai-review-human.yml@main\n`,
     ),
   );
   assert.match(human, /\n {4}permissions:\n {6}contents: read\n {6}pull-requests: write\n {6}statuses: write\n$/u);

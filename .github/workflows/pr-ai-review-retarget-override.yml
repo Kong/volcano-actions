@@ -1,7 +1,7 @@
 # This repository's retarget and override runs: the second caller stub other
 # Volcano repositories copy. See README.md.
 
-name: Claude Review (retarget and override)
+name: AI Review (retarget and override)
 
 on:
   pull_request_target:
@@ -12,8 +12,8 @@ permissions: {}
 
 jobs:
   retarget-or-override:
-    if: github.event.changes.base || github.event.label.name == 'claude-review-override'
-    uses: Kong/volcano-actions/.github/workflows/claude-review.yml@main
+    if: github.event.changes.base || github.event.label.name == 'ai-review-override'
+    uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
     permissions:
       contents: read
       pull-requests: write
