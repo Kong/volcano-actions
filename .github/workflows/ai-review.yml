@@ -112,7 +112,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@cd3c62db2fed8a93ba704dae434a9d477856fe2e
+        uses: Kong/volcano-actions/.github/actions/ai-review@15e8b813d7aa3d7645e6e258fb5b40b1ed3a890b
         with:
           step: start
 
@@ -160,7 +160,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@cd3c62db2fed8a93ba704dae434a9d477856fe2e
+        uses: Kong/volcano-actions/.github/actions/ai-review@15e8b813d7aa3d7645e6e258fb5b40b1ed3a890b
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -248,7 +248,7 @@ jobs:
           persist-credentials: true
       # Writes the same inputs as the claude job, before the credentials go.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@cd3c62db2fed8a93ba704dae434a9d477856fe2e
+        uses: Kong/volcano-actions/.github/actions/ai-review@15e8b813d7aa3d7645e6e258fb5b40b1ed3a890b
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -305,7 +305,7 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@cd3c62db2fed8a93ba704dae434a9d477856fe2e
+      - uses: Kong/volcano-actions/.github/actions/ai-review@15e8b813d7aa3d7645e6e258fb5b40b1ed3a890b
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
@@ -324,6 +324,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@cd3c62db2fed8a93ba704dae434a9d477856fe2e
+      - uses: Kong/volcano-actions/.github/actions/ai-review@15e8b813d7aa3d7645e6e258fb5b40b1ed3a890b
         with:
           step: override
