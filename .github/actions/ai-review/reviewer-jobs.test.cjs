@@ -19,19 +19,47 @@ test('every job with a reviewer output is in verdict.needs, and every job it nee
   assert.deepEqual(Object.keys(providers), needs);
 });
 
-test('every reviewer job names itself and its model, and reports its findings and candidates', () => {
+test('every reviewer job names itself and its model, and reports its candidates', () => {
   const jobs = jobsOf(reviewWorkflow());
   for (const name of reviewerJobs(jobs)) {
     const outputs = outputsOf(jobs[name]);
-    assert.deepEqual(Object.keys(outputs), ['reviewer', 'model', 'findings', 'candidates'], name);
+    // The review itself is an artifact, which no environment variable carries.
+    assert.deepEqual(Object.keys(outputs), ['reviewer', 'model', 'candidates'], name);
     // A static name, which only the run log shows.
     assert.match(outputs.reviewer, /^[A-Z][\w ]*$/u, name);
     // The model the provider step runs, which each inline comment's footer names.
     assert.equal(outputs.model, stepText(jobs[name], providers[name].step).match(providers[name].model)?.[1], name);
-    const id = providers[name].step.slice('- id: '.length);
-    assert.match(outputs.findings, new RegExp(`^\\$\\{\\{ steps\\.${id}\\.outputs\\.[\\w-]+ \\}\\}$`, 'u'), name);
     assert.equal(outputs.candidates, '${{ steps.prepare.outputs.candidates }}', name);
   }
+});
+
+test('every reviewer job uploads only its structured output, as the artifact named for the job', () => {
+  const jobs = jobsOf(reviewWorkflow());
+  for (const name of reviewerJobs(jobs)) {
+    const steps = stepsOf(jobs[name]);
+    const file = `\${{ runner.temp }}/ai-review-${name}.json`;
+    const upload = stepText(jobs[name], 'actions/upload-artifact@');
+    assert.match(upload, /^actions\/upload-artifact@[a-f0-9]{40} # v[\d.]+\n/u, name);
+    assert.ok(upload.includes(`\n          name: ai-review-${name}\n          path: ${file}\n`), name);
+    // A missing output or a failed upload fails the job, so the review is incomplete.
+    assert.match(upload, /\n {10}if-no-files-found: error\n/u, name);
+    assert.match(upload, /\n {8}timeout-minutes: \d+\n/u, name);
+    assert.doesNotMatch(jobs[name], /continue-on-error/u, name);
+    assert.equal(jobs[name].match(/actions\/upload-artifact@/gu).length, 1, name);
+    // The provider step, or one after it, writes the file the upload reads.
+    const from = steps.indexOf(providers[name].step);
+    const to = steps.indexOf('actions/upload-artifact@');
+    assert.ok(from !== -1 && from < to, name);
+    assert.ok(steps.slice(from, to).includes(file), name);
+  }
+  // Claude's execution file holds everything it read; only the output leaves.
+  const save = stepText(jobs.claude, '- name: Save the review');
+  assert.match(save, /\n {10}EXECUTION_FILE: \$\{\{ steps\.claude\.outputs\.execution_file \}\}\n/u);
+  assert.match(save, /\n {8}run: jq -ce '.*\| \.structured_output' "\$EXECUTION_FILE" > "\$REVIEW"$/u);
+  assert.match(
+    stepText(jobs.codex, providers.codex.step),
+    /\n {10}output-file: \$\{\{ runner\.temp \}\}\/ai-review-codex\.json\n/u,
+  );
 });
 
 test('no reviewer job holds a write token; the verdict job posts the comments', () => {
@@ -132,11 +160,28 @@ test('one verdict job publishes every reviewer once any of them finishes', () =>
     job,
     /\n {4}if: always\(\) && \(contains\(needs\.\*\.result, 'success'\) \|\| contains\(needs\.\*\.result, 'failure'\)\)\n/u,
   );
-  assert.equal(stepsOf(job).match(/\n {6}- /gu).length, 1);
-  assert.ok(stepsOf(job).includes(`- uses: ${action}\n`));
+  const steps = stepsOf(job);
+  assert.equal(steps.match(/\n {6}- /gu).length, 2);
+  assert.ok(steps.indexOf('actions/download-artifact@') < steps.indexOf(`- uses: ${action}\n`));
+  // Every reviewer's artifact, into one directory, and never a reason to skip publish.
+  const download = stepText(job, 'actions/download-artifact@');
+  assert.match(download, /^actions\/download-artifact@[a-f0-9]{40} # v[\d.]+\n/u);
+  const outputs = '${{ runner.temp }}/ai-review-outputs';
+  for (const line of [
+    'timeout-minutes: 2',
+    'continue-on-error: true',
+    '  pattern: ai-review-*',
+    '  merge-multiple: true',
+    `  path: ${outputs}`,
+  ]) {
+    assert.ok(download.includes(`\n        ${line}\n`) || download.endsWith(`\n        ${line}`), line);
+  }
+  const timeout = (text) => Number(text.match(/\n {4,8}timeout-minutes: (\d+)\n/u)[1]);
+  assert.ok(timeout(download) < timeout(job));
   for (const line of [
     'step: publish',
     'reviews: ${{ toJSON(needs) }}',
+    `review-outputs: ${outputs}`,
     'human-review-paths: ${{ inputs.human_review_paths }}',
   ]) {
     assert.ok(job.includes(`\n          ${line}\n`), line);
