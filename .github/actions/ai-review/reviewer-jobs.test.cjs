@@ -4,11 +4,11 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
 
-// Each reviewer job's provider step, the API key secret it calls with, and
+// Each reviewer job's provider step, the credential secret it calls with, and
 // how that step names its model.
 const providers = {
   claude: { step: '- id: claude', secret: 'anthropic_api_key', model: /\n {12}--model (\S+)\n/u },
-  codex: { step: '- id: codex', secret: 'openai_api_key', model: /\n {10}model: (\S+)\n/u },
+  codex: { step: '- id: codex', secret: 'codex_access_token', model: /\n {10}MODEL: (\S+)\n/u },
 };
 const prepare = `- id: prepare\n        uses: ${action}\n        with:\n          step: prepare\n          focus: \${{ inputs.focus }}\n`;
 
@@ -46,21 +46,21 @@ test('no reviewer job holds a write token; the verdict job posts the comments', 
   }
 });
 
-test('every reviewer job requires its key, then prepares the base checkout with the action', () => {
+test('every reviewer job requires its credential, then prepares the base checkout with the action', () => {
   const jobs = jobsOf(reviewWorkflow());
   for (const name of reviewerJobs(jobs)) {
     const { step, secret } = providers[name];
     const steps = stepsOf(jobs[name]);
-    // A missing key fails the job, so the other reviewers' verdict stands.
-    const guard = stepText(jobs[name], '- name: Require the API key');
-    assert.equal(steps.match(/^ {6}- (.*)$/mu)[1], 'name: Require the API key', name);
+    // A missing credential fails the job, so the other reviewers' verdict stands.
+    const guard = stepText(jobs[name], '- name: Require the credential');
+    assert.equal(steps.match(/^ {6}- (.*)$/mu)[1], 'name: Require the credential', name);
     assert.match(guard, new RegExp(`\\n {10}KEY_SET: \\$\\{\\{ secrets\\.${secret} != '' \\}\\}\\n`, 'u'), name);
     assert.match(guard, /exit 1\n/u, name);
     // The base sits at the workspace root; prepare puts the head beside it as data.
     assert.deepEqual(jobs[name].match(/ ref: .*/gu), [' ref: ${{ github.event.pull_request.base.sha }}'], name);
     assert.equal(jobs[name].match(/actions\/checkout@/gu).length, 1, name);
     assert.ok(steps.includes(prepare), name);
-    const order = ['- name: Require the API key', 'actions/checkout@', '- id: prepare', step].map((m) =>
+    const order = ['- name: Require the credential', 'actions/checkout@', '- id: prepare', step].map((m) =>
       steps.indexOf(m),
     );
     assert.deepEqual(
@@ -77,7 +77,7 @@ test('every reviewer gets the shared policy first and a schema from prepare', ()
   const jobs = jobsOf(reviewWorkflow());
   for (const name of reviewerJobs(jobs)) {
     const run = stepText(jobs[name], providers[name].step);
-    assert.match(run, /\n {10}prompt: \|\n {12}\$\{\{ steps\.prepare\.outputs\.policy \}\}\n\n/u, name);
+    assert.match(run, /\n {10}(?:prompt|PROMPT): \|\n {12}\$\{\{ steps\.prepare\.outputs\.policy \}\}\n\n/u, name);
     assert.match(run, /\$\{\{ steps\.prepare\.outputs\.schema(?:-without-max-length)? \}\}/u, name);
     // The policy is the one place a review's rules live.
     assert.doesNotMatch(run, /- p0: |Separately from findings|reviewers\.jsonl lists|\$\{\{ inputs\.focus \}\}/u, name);
@@ -90,8 +90,8 @@ test('every reviewer gets the shared policy first and a schema from prepare', ()
   assert.match(claude, /\n {12}Post no comments; the workflow publishes your structured output\.\n/u);
   const codex = stepText(jobs.codex, providers.codex.step);
   // OpenAI's structured outputs reject maxLength.
-  assert.match(codex, /\n {10}output-schema: \$\{\{ steps\.prepare\.outputs\.schema-without-max-length \}\}\n/u);
-  assert.doesNotMatch(codex.slice(codex.indexOf('prompt: |')), /inline comment|mcp__|commit_id/u);
+  assert.match(codex, /\n {10}SCHEMA: \$\{\{ steps\.prepare\.outputs\.schema-without-max-length \}\}\n/u);
+  assert.doesNotMatch(codex.slice(codex.indexOf('PROMPT: |')), /inline comment|mcp__|commit_id/u);
 });
 
 test('a hung reviewer fails its job instead of leaving the head pending', () => {
@@ -116,14 +116,24 @@ test('the codex job reviews with read access only and drops the credentials befo
   assert.match(drop, /--unset-all "\$key"/u);
 });
 
-test('Codex runs pinned and read-only', () => {
-  const run = stepText(jobsOf(reviewWorkflow()).codex, providers.codex.step);
-  assert.match(run, /\n {8}uses: openai\/codex-action@[a-f0-9]{40} # v[\d.]+\n/u);
-  assert.match(run, /\n {10}codex-version: \d+\.\d+\.\d+\n/u);
-  assert.match(run, /\n {10}model: [\w.-]+\n/u);
-  assert.match(run, /\n {10}permission-profile: ':read-only'\n/u);
-  // The default drop-sudo strategy; `unsafe` or a legacy sandbox would widen access.
-  assert.doesNotMatch(run, /safety-strategy|sandbox:|codex-args|--full-auto|danger/u);
+test('Codex runs pinned and read-only, and its commands cannot read the token', () => {
+  const { codex } = jobsOf(reviewWorkflow());
+  const steps = stepsOf(codex);
+  assert.ok(steps.indexOf('- name: Install Codex') < steps.indexOf('- id: codex'));
+  const install = stepText(codex, '- name: Install Codex');
+  assert.match(install, /\n {10}CODEX_VERSION: \d+\.\d+\.\d+\n/u);
+  assert.match(install, /\n {10}npm install -g "@openai\/codex@\$CODEX_VERSION"\n/u);
+  const run = stepText(codex, providers.codex.step);
+  assert.match(run, /\n {10}MODEL: [\w.-]+\n/u);
+  assert.match(run, / -c 'default_permissions=":read-only"' /u);
+  // Codex passes its whole environment to commands unless told otherwise.
+  assert.match(run, / -c 'shell_environment_policy\.ignore_default_excludes=false' /u);
+  assert.doesNotMatch(
+    run,
+    /--sandbox|--full-auto|--dangerously|danger-full-access|shell_environment_policy\.(?:inherit|set)/u,
+  );
+  // GitHub drops a job output that contains the token, so a leaked token never reaches the verdict job.
+  assert.match(run, /\n {10}CODEX_ACCESS_TOKEN: \$\{\{ secrets\.codex_access_token \}\}\n/u);
 });
 
 test('one verdict job publishes every reviewer once any of them finishes', () => {
