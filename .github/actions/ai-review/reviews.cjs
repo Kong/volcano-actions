@@ -12,10 +12,13 @@ function cap(text, max) {
   return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`;
 }
 
-// The verdict job's `needs`, as `toJSON(needs)` renders it. Every job with a
-// `reviewer` output is a reviewer, named by it, in the order the object lists
-// them. Reviewer candidates come from the first one that reports them; every
-// reviewer job finds them from the same base history.
+// The verdict job's `needs`, as `toJSON(needs)` renders it. The verdict job
+// needs only reviewer jobs, so every entry is a reviewer, in the order the
+// object lists them. Each is named by its `reviewer` output, or by its job ID
+// when it set no outputs, as when it was skipped, so a reviewer that did not
+// run is still reported as incomplete. Reviewer candidates come from the
+// first one that reports them; every reviewer job finds them from the same
+// base history.
 function reviewersOf(raw) {
   let needs;
   try {
@@ -23,16 +26,19 @@ function reviewersOf(raw) {
   } catch {
     needs = {};
   }
-  const jobs = Object.values(needs && typeof needs === 'object' ? needs : {}).filter(
-    (job) => typeof job?.outputs?.reviewer === 'string' && job.outputs.reviewer.trim(),
-  );
+  const entries = needs && typeof needs === 'object' && !Array.isArray(needs) ? Object.entries(needs) : [];
+  const jobs = entries.filter(([, job]) => job && typeof job === 'object');
+  const nameOf = (id, job) => {
+    const named = typeof job.outputs?.reviewer === 'string' ? job.outputs.reviewer.trim() : '';
+    return named || `${id.charAt(0).toUpperCase()}${id.slice(1)}`;
+  };
   return {
-    reviewers: jobs.map((job) => ({
-      name: job.outputs.reviewer.trim(),
+    reviewers: jobs.map(([id, job]) => ({
+      name: nameOf(id, job),
       result: job.result,
-      output: job.outputs.findings ?? '',
+      output: job.outputs?.findings ?? '',
     })),
-    candidates: jobs.find((job) => job.outputs.candidates)?.outputs.candidates ?? '',
+    candidates: jobs.find(([, job]) => job.outputs?.candidates)?.[1].outputs.candidates ?? '',
   };
 }
 

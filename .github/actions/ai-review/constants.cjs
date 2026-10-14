@@ -26,7 +26,7 @@ const fit = (text) => (text.length <= 140 ? text : `${text.slice(0, 139)}…`);
 
 // Breaks @mentions and inline code spans so finding text cannot ping people or
 // escape its formatting.
-const clean = (text) => String(text).replaceAll('@', '@​');
+const clean = (text) => String(text).replaceAll('@', '@\u200B');
 const code = (text) => `\`${String(text).replaceAll('`', "'")}\``;
 
 // Reviewer names as prose: "Claude", "Claude and Codex", "A, B, and C".

@@ -8,20 +8,22 @@ const { sha, finding, reviewJson, needsOf, clearAfter, client, context, core } =
 
 const job = (result, outputs) => ({ result, outputs });
 
-test('every job in needs with a reviewer output is a reviewer, in the order needs lists them', () => {
+test('every job in needs is a reviewer, named by its output or its job ID, in the order needs lists them', () => {
   const needs = {
     codex: job('failure', { reviewer: 'Codex', findings: '', candidates: '' }),
-    lint: job('success', { findings: reviewJson() }),
     claude: job('success', { reviewer: ' Claude ', findings: 'x', candidates: '["bob"]' }),
-    gemini: job('cancelled', { reviewer: 'Gemini' }),
+    // A skipped or early-cancelled job sets no outputs, but still counts.
+    gemini: job('skipped', {}),
+    mistral: { result: 'cancelled' },
     other: job('success', { reviewer: '  ' }),
-    skipped: job('skipped', {}),
   };
   assert.deepEqual(reviewersOf(JSON.stringify(needs)), {
     reviewers: [
       { name: 'Codex', result: 'failure', output: '' },
       { name: 'Claude', result: 'success', output: 'x' },
-      { name: 'Gemini', result: 'cancelled', output: '' },
+      { name: 'Gemini', result: 'skipped', output: '' },
+      { name: 'Mistral', result: 'cancelled', output: '' },
+      { name: 'Other', result: 'success', output: '' },
     ],
     candidates: '["bob"]',
   });
@@ -75,7 +77,7 @@ test('publish warns once for each review that did not complete', async (t) => {
   assert.deepEqual(c.set(humanStatusContext), [[sha, 'success', 'No human review needed.']]);
 });
 
-test('publish with no reviewer in its input errors the verdict and fails the job', async (t) => {
+test('publish with no reviewer, or none that completed, errors the verdict and fails the job', async (t) => {
   clearAfter(t, 'REVIEWS');
   for (const raw of [undefined, '{}', JSON.stringify({ start: job('success', { review: 'true' }) })]) {
     if (raw === undefined) delete process.env.REVIEWS;
