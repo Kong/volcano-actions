@@ -67,11 +67,11 @@ test('the workflow keeps every reviewer inside its trust boundary', () => {
 
 test('every reviewer credential is an optional secret the caller passes', () => {
   const workflow = reviewWorkflow();
-  for (const secret of ['anthropic_api_key', 'codex_access_token', 'openai_api_key']) {
+  for (const secret of ['anthropic_api_key', 'codex_access_token']) {
     assert.match(workflow, new RegExp(`\\n {6}${secret}:\\n(?: {8}.*\\n)*? {8}required: false\\n`, 'u'), secret);
   }
-  // Declared only so stubs that still pass it keep running.
-  assert.doesNotMatch(workflow, /secrets\.openai_api_key/u);
+  // Codex authenticates with a ChatGPT access token, never an OpenAI API key.
+  assert.doesNotMatch(workflow, /openai_api_key|openai-api-key/u);
   assert.doesNotMatch(workflow, /anthropic_(?:federation_rule|organization|service_account|workspace)_id/u);
 });
 

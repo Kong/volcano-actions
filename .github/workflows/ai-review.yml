@@ -83,11 +83,6 @@ on:
       codex_access_token:
         description: The ChatGPT workspace access token the codex job runs Codex with. Every caller passes it; the codex job fails without it.
         required: false
-      # Callers passed this before codex_access_token. Passing an undeclared
-      # secret fails the caller's run, so it stays until no stub passes it.
-      openai_api_key:
-        description: Unused. Pass codex_access_token instead.
-        required: false
 
 permissions: {}
 
