@@ -61,6 +61,17 @@ test('the policy is the shared review, with nothing one provider does', () => {
   );
 });
 
+// OpenAI's strict structured outputs need each object to require every
+// property it lists and allow no others.
+function assertStrict(node, where = 'schema') {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'object') {
+    assert.deepEqual(new Set(node.required), new Set(Object.keys(node.properties)), where);
+    assert.equal(node.additionalProperties, false, where);
+  }
+  for (const [key, child] of Object.entries(node)) assertStrict(child, `${where}.${key}`);
+}
+
 test('the schema asks for what publish reads, and its variant only drops maxLength', () => {
   const { schema, withoutMaxLength } = schemas();
   // Claude's arguments carry the schema in single quotes, on one line.
@@ -71,11 +82,21 @@ test('the schema asks for what publish reads, and its variant only drops maxLeng
   assert.deepEqual(parsed.required, ['summary', 'findings', 'human_review', 'not_checked', 'reviewed_closely']);
   assert.deepEqual(parsed.properties.human_review.required, ['needed', 'reasons', 'reviewer', 'reviewer_reason']);
   assert.equal(parsed.properties.summary.maxLength, 1500);
+  const finding = parsed.properties.findings.items;
+  assert.deepEqual(finding.required, ['severity', 'path', 'line', 'title', 'detail']);
+  assert.equal(finding.properties.detail.type, 'string');
+  assert.equal(finding.properties.detail.maxLength, 1500);
+  assertStrict(parsed);
 
   assert.doesNotMatch(withoutMaxLength, /maxLength|['\n]/u);
   const strip = (text) => text.replaceAll(/"maxLength":\d+,?/gu, '').replaceAll(',}', '}');
   assert.deepEqual(JSON.parse(withoutMaxLength), JSON.parse(strip(schema)));
   assert.equal(JSON.parse(withoutMaxLength).properties.findings.maxItems, 30);
+  assert.deepEqual(JSON.parse(withoutMaxLength).properties.findings.items.properties.detail, {
+    type: 'string',
+    description: finding.properties.detail.description,
+  });
+  assertStrict(JSON.parse(withoutMaxLength));
 });
 
 test('prepare sets every output a reviewer job reads', async (t) => {

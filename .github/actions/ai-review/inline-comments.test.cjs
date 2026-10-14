@@ -5,10 +5,11 @@ const test = require('node:test');
 const { statusContext, publish } = require('./ai-review.cjs');
 const { sha, finding, reviewJson, needsOf, clearAfter, client, context, core } = require('./test-helpers.cjs');
 
-const nilMap = finding('p1');
+const why = 'The first `Put` writes to a nil `seen` map and panics. Make the map in `New`.';
+const nilMap = finding('p1', { detail: why });
 const typo = finding('p3', { path: 'docs/a.md', line: 3, title: 'Typo @kong/docs' });
 const fileLevel = finding('pre_existing', { line: 0, title: 'Old debt' });
-const opus = '**🟠 P1:** Nil map write\n\n<sub>Found by claude-opus-5-5</sub>';
+const opus = `**🟠 P1:** Nil map write\n\n${why}\n\n<sub>Found by claude-opus-5-5</sub>`;
 
 // Publishes these reviewers, as [name, result, findings, candidates, model].
 async function publishWith(reviewers, options = {}) {
@@ -31,7 +32,7 @@ test("publish posts each completed review's findings on a line, signed by its mo
   assert.deepEqual(posted, [
     ['internal/a.go', 12, opus],
     ['docs/a.md', 3, '**⚪ P3:** Typo @​kong/docs\n\n<sub>Found by claude-opus-5-5</sub>'],
-    ['internal/a.go', 12, '**🟠 P1:** Nil map write\n\n<sub>Found by Codex</sub>'],
+    ['internal/a.go', 12, `**🟠 P1:** Nil map write\n\n${why}\n\n<sub>Found by Codex</sub>`],
   ]);
   for (const comment of c.named('createReviewComment')) {
     assert.deepEqual([comment.pull_number, comment.commit_id, comment.side], [7, sha, 'RIGHT']);
@@ -84,7 +85,7 @@ test("publish skips a line where it already posted the model's finding at that l
     [['Claude', 'success', reviewJson({ findings: [nilMap, nilMap, typo, fileLevel] }), '', 'claude-opus-5-5']],
     {
       reviewComments: [
-        // The same model and level at the same line, worded differently on an earlier run.
+        // The same model and level at the same line, worded differently and without a detail on an earlier run.
         {
           user: bot,
           path: 'internal/a.go',
@@ -107,6 +108,26 @@ test("publish skips a line where it already posted the model's finding at that l
     [['docs/a.md', 3]],
   );
   assert.equal(c.named('listReviewComments').length, 1);
+});
+
+test("a detail, or its absence, never changes which of the model's earlier comments covers a finding", async (t) => {
+  clearAfter(t, 'REVIEWS');
+  const earlier = (detail) => ({
+    user: bot,
+    path: 'internal/a.go',
+    line: 12,
+    body: `**🟠 P1:** Nil map write${detail}\n\n<sub>Found by claude-opus-5-5</sub>`,
+  });
+  for (const [now, before] of [
+    [finding('p1'), earlier(`\n\n${why}`)],
+    [nilMap, earlier('\n\nAn earlier detail.\n\nIn two paragraphs.')],
+  ]) {
+    const { posted } = await publishWith(
+      [['Claude', 'success', reviewJson({ findings: [now] }), '', 'claude-opus-5-5']],
+      { reviewComments: [before] },
+    );
+    assert.deepEqual(posted, []);
+  }
 });
 
 test('comments by anyone else, or at another level, never suppress a finding', async (t) => {
@@ -160,7 +181,7 @@ test('a comment outside the diff is skipped with a notice, and other errors only
   ]);
   const unlisted = await publishWith(reviewers, { failReviewComments: true });
   assert.deepEqual(unlisted.posted, []);
-  assert.match(unlisted.k.warnings[0], /^Could not list the PR's review comments, so none were posted/u);
+  assert.match(unlisted.k.warnings[0], /^Could not read the PR's head or review comments, so none were posted/u);
   for (const { c, k } of [outside, broken, unlisted]) {
     assert.deepEqual(k.failures, []);
     assert.equal(c.set(statusContext)[0][1], 'failure');
@@ -180,4 +201,44 @@ test('nothing is posted without a completed finding on a line', async (t) => {
     assert.deepEqual(c.named('listReviewComments'), [], JSON.stringify(reviewers));
     assert.deepEqual(c.named('createReviewComment'), [], JSON.stringify(reviewers));
   }
+});
+
+test("a finding's detail sits between its title and footer, cleaned and capped", async (t) => {
+  clearAfter(t, 'REVIEWS');
+  const details = ['  Pings @kong/docs.\n', 'd'.repeat(1501), '🔥'.repeat(1500)];
+  const findings = details.map((detail, i) => finding('p3', { line: i + 1, detail }));
+  const { c, posted } = await publishWith([['Claude', 'success', reviewJson({ findings }), '', 'm']]);
+  assert.deepEqual(
+    posted.map(([, , body]) => body.split('\n\n')),
+    ['Pings @\u200Bkong/docs.', `${'d'.repeat(1499)}…`, '🔥'.repeat(1500)].map((d) => [
+      '**⚪ P3:** Nil map write',
+      d,
+      '<sub>Found by m</sub>',
+    ]),
+  );
+  // The summary lists titles only.
+  assert.doesNotMatch(c.named('createComment')[0].body, /Pings|ddd|🔥/u);
+});
+
+test('a finding without a detail completes, and its comment has only the title and footer', async (t) => {
+  clearAfter(t, 'REVIEWS');
+  const findings = [undefined, '', ' \n ', 42, null].map((detail, i) => finding('p1', { line: i + 1, detail }));
+  const { c, k, posted } = await publishWith([['Claude', 'success', reviewJson({ findings }), '', 'm']]);
+  assert.deepEqual(
+    posted.map(([, line, body]) => [line, body]),
+    [1, 2, 3, 4, 5].map((line) => [line, '**🟠 P1:** Nil map write\n\n<sub>Found by m</sub>']),
+  );
+  assert.deepEqual(c.set(statusContext)[0].slice(1), ['failure', '5 P0-P2 finding(s). See the AI review comment.']);
+  assert.deepEqual([k.failures, k.warnings], [[], []]);
+});
+
+test('a head the PR has moved past gets no inline comments', async (t) => {
+  clearAfter(t, 'REVIEWS');
+  const reviewers = [['Claude', 'success', reviewJson({ findings: [nilMap] }), '', 'claude-opus-5-5']];
+  const { c, k } = await publishWith(reviewers, { liveHead: 'fedcba9876543210' });
+  assert.deepEqual([c.named('listReviewComments'), c.named('createReviewComment')], [[], []]);
+  assert.ok(k.notices.includes('Skipped the inline comments on abcdef1, which is no longer the PR head.'));
+  // The reviewed head still gets its verdict.
+  assert.deepEqual(c.set(statusContext)[0].slice(0, 2), [sha, 'failure']);
+  assert.deepEqual(k.failures, []);
 });

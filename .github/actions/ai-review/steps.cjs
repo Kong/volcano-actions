@@ -100,6 +100,17 @@ function reportIncomplete(core, sha, result) {
   if (result.state === 'error') core.setFailed(`No AI review produced a verdict for ${sha}.`);
 }
 
+// A finding's level and title, why it matters, and the model that found it.
+// An older output, or a reviewer that omitted detail, still gets the rest.
+function commentBody(f, signer) {
+  const detail = typeof f.detail === 'string' ? f.detail.trim() : '';
+  return [
+    `**${severities[severityOf(f)]}:** ${clean(cap(String(f.title), 200))}`,
+    ...(detail ? [clean(cap(detail, 1500))] : []),
+    `<sub>Found by ${clean(cap(signer, 100))}</sub>`,
+  ].join('\n\n');
+}
+
 // Each completed review's findings on a line, as inline comments signed by
 // the model that found them.
 const inlineComments = (reviewers) =>
@@ -108,18 +119,15 @@ const inlineComments = (reviewers) =>
     .flatMap(({ name, model, review }) =>
       review.findings
         .filter((f) => Number.isInteger(f.line) && f.line > 0)
-        .map((f) => ({
-          path: String(f.path),
-          line: f.line,
-          body: `**${severities[severityOf(f)]}:** ${clean(cap(String(f.title), 200))}\n\n<sub>Found by ${clean(cap(model || name, 100))}</sub>`,
-        })),
+        .map((f) => ({ path: String(f.path), line: f.line, body: commentBody(f, model || name) })),
     );
 
-// Posts the inline comments on the reviewed head. Reviewers may comment on the
-// same problem. A model's wording varies between runs, so a later push skips a
-// line where this action already posted the same model's finding at the same
-// level; comments by anyone else never count. Comments sit beside the verdict,
-// so no failure here fails the job.
+// Posts the inline comments on the reviewed head while it is the live head;
+// like the summary, a newer head's review comments for itself. Reviewers may
+// comment on the same problem. A model's wording varies between runs, so a
+// later push skips a line where this action already posted the same model's
+// finding at the same level; comments by anyone else never count. Comments sit
+// beside the verdict, so no failure here fails the job.
 async function postFindings({ github, context, core }, reviewers) {
   const pr = context.payload.pull_request;
   const comments = [...new Map(inlineComments(reviewers).map((c) => [JSON.stringify(c), c])).values()];
@@ -128,6 +136,10 @@ async function postFindings({ github, context, core }, reviewers) {
   const at = (c) => JSON.stringify([c.path, c.line, lines(c.body)[0].split(':**')[0], lines(c.body).at(-1)]);
   let posted;
   try {
+    if (!(await isLiveHead(github, context))) {
+      core.notice(`Skipped the inline comments on ${pr.head.sha.slice(0, 7)}, which is no longer the PR head.`);
+      return;
+    }
     const existing = await github.paginate(github.rest.pulls.listReviewComments, {
       ...context.repo,
       pull_number: pr.number,
@@ -135,7 +147,7 @@ async function postFindings({ github, context, core }, reviewers) {
     });
     posted = new Set(existing.filter((c) => c.user?.login === 'github-actions[bot]').map((c) => at(c)));
   } catch (error) {
-    core.warning(`Could not list the PR's review comments, so none were posted: ${error.message}`);
+    core.warning(`Could not read the PR's head or review comments, so none were posted: ${error.message}`);
     return;
   }
   for (const comment of comments) {
