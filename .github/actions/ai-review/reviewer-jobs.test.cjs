@@ -2,13 +2,24 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { spawnSync } = require('node:child_process');
 const { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
 
-// Each reviewer job's provider step, the API key secret it calls with, and
-// how that step names its model.
+// Each reviewer job's provider step, the credential secret it calls with, how
+// that step names its model, and how the job refuses bots outside allowed_bots.
 const providers = {
-  claude: { step: '- id: claude', secret: 'anthropic_api_key', model: /\n {12}--model (\S+)\n/u },
-  codex: { step: '- id: codex', secret: 'openai_api_key', model: /\n {10}model: (\S+)\n/u },
+  claude: {
+    step: '- id: claude',
+    secret: 'anthropic_api_key',
+    model: /\n {12}--model (\S+)\n/u,
+    bots: /\n {10}allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/u,
+  },
+  codex: {
+    step: '- id: codex',
+    secret: 'codex_access_token',
+    model: /\n {10}MODEL: (\S+)\n/u,
+    bots: /\n {10}ALLOWED: \$\{\{ inputs\.allowed_bots \}\}\n/u,
+  },
 };
 const prepare = `- id: prepare\n        uses: ${action}\n        with:\n          step: prepare\n          focus: \${{ inputs.focus }}\n`;
 
@@ -56,10 +67,9 @@ test('every reviewer job uploads only its structured output, as the artifact nam
   const save = stepText(jobs.claude, '- name: Save the review');
   assert.match(save, /\n {10}EXECUTION_FILE: \$\{\{ steps\.claude\.outputs\.execution_file \}\}\n/u);
   assert.match(save, /\n {8}run: jq -ce '.*\| \.structured_output' "\$EXECUTION_FILE" > "\$REVIEW"$/u);
-  assert.match(
-    stepText(jobs.codex, providers.codex.step),
-    /\n {10}output-file: \$\{\{ runner\.temp \}\}\/ai-review-codex\.json\n/u,
-  );
+  const codex = stepText(jobs.codex, providers.codex.step);
+  assert.match(codex, /\n {10}REVIEW: \$\{\{ runner\.temp \}\}\/ai-review-codex\.json\n/u);
+  assert.match(codex, /\n {12}-o "\$REVIEW" -(?:\n|$)/u);
 });
 
 test('no reviewer job holds a write token; the verdict job posts the comments', () => {
@@ -74,21 +84,21 @@ test('no reviewer job holds a write token; the verdict job posts the comments', 
   }
 });
 
-test('every reviewer job requires its key, then prepares the base checkout with the action', () => {
+test('every reviewer job requires its credential, then prepares the base checkout with the action', () => {
   const jobs = jobsOf(reviewWorkflow());
   for (const name of reviewerJobs(jobs)) {
     const { step, secret } = providers[name];
     const steps = stepsOf(jobs[name]);
-    // A missing key fails the job, so the other reviewers' verdict stands.
-    const guard = stepText(jobs[name], '- name: Require the API key');
-    assert.equal(steps.match(/^ {6}- (.*)$/mu)[1], 'name: Require the API key', name);
+    // A missing credential fails the job, so the other reviewers' verdict stands.
+    const guard = stepText(jobs[name], '- name: Require the credential');
+    assert.equal(steps.match(/^ {6}- (.*)$/mu)[1], 'name: Require the credential', name);
     assert.match(guard, new RegExp(`\\n {10}KEY_SET: \\$\\{\\{ secrets\\.${secret} != '' \\}\\}\\n`, 'u'), name);
     assert.match(guard, /exit 1\n/u, name);
     // The base sits at the workspace root; prepare puts the head beside it as data.
     assert.deepEqual(jobs[name].match(/ ref: .*/gu), [' ref: ${{ github.event.pull_request.base.sha }}'], name);
     assert.equal(jobs[name].match(/actions\/checkout@/gu).length, 1, name);
     assert.ok(steps.includes(prepare), name);
-    const order = ['- name: Require the API key', 'actions/checkout@', '- id: prepare', step].map((m) =>
+    const order = ['- name: Require the credential', 'actions/checkout@', '- id: prepare', step].map((m) =>
       steps.indexOf(m),
     );
     assert.deepEqual(
@@ -105,7 +115,7 @@ test('every reviewer gets the shared policy first and a schema from prepare', ()
   const jobs = jobsOf(reviewWorkflow());
   for (const name of reviewerJobs(jobs)) {
     const run = stepText(jobs[name], providers[name].step);
-    assert.match(run, /\n {10}prompt: \|\n {12}\$\{\{ steps\.prepare\.outputs\.policy \}\}\n\n/u, name);
+    assert.match(run, /\n {10}(?:prompt|PROMPT): \|\n {12}\$\{\{ steps\.prepare\.outputs\.policy \}\}\n\n/u, name);
     assert.match(run, /\$\{\{ steps\.prepare\.outputs\.schema(?:-without-max-length)? \}\}/u, name);
     // The policy is the one place a review's rules live.
     assert.doesNotMatch(run, /- p0: |Separately from findings|reviewers\.jsonl lists|\$\{\{ inputs\.focus \}\}/u, name);
@@ -118,8 +128,8 @@ test('every reviewer gets the shared policy first and a schema from prepare', ()
   assert.match(claude, /\n {12}Post no comments; the workflow publishes your structured output\.\n/u);
   const codex = stepText(jobs.codex, providers.codex.step);
   // OpenAI's structured outputs reject maxLength.
-  assert.match(codex, /\n {10}output-schema: \$\{\{ steps\.prepare\.outputs\.schema-without-max-length \}\}\n/u);
-  assert.doesNotMatch(codex.slice(codex.indexOf('prompt: |')), /inline comment|mcp__|commit_id/u);
+  assert.match(codex, /\n {10}SCHEMA: \$\{\{ steps\.prepare\.outputs\.schema-without-max-length \}\}\n/u);
+  assert.doesNotMatch(codex.slice(codex.indexOf('PROMPT: |')), /inline comment|mcp__|commit_id/u);
 });
 
 test('a hung reviewer fails its job instead of leaving the head pending', () => {
@@ -144,14 +154,68 @@ test('the codex job reviews with read access only and drops the credentials befo
   assert.match(drop, /--unset-all "\$key"/u);
 });
 
-test('Codex runs pinned and read-only', () => {
-  const run = stepText(jobsOf(reviewWorkflow()).codex, providers.codex.step);
-  assert.match(run, /\n {8}uses: openai\/codex-action@[a-f0-9]{40} # v[\d.]+\n/u);
-  assert.match(run, /\n {10}codex-version: \d+\.\d+\.\d+\n/u);
-  assert.match(run, /\n {10}model: [\w.-]+\n/u);
-  assert.match(run, /\n {10}permission-profile: ':read-only'\n/u);
-  // The default drop-sudo strategy; `unsafe` or a legacy sandbox would widen access.
-  assert.doesNotMatch(run, /safety-strategy|sandbox:|codex-args|--full-auto|danger/u);
+test('Codex runs pinned and read-only, with no credential in its commands', () => {
+  const { codex } = jobsOf(reviewWorkflow());
+  const steps = stepsOf(codex);
+  const order = [
+    '- name: Install Codex',
+    "- name: Check that Codex's commands cannot read its environment",
+    '- id: codex',
+  ].map((m) => steps.indexOf(m));
+  assert.ok(!order.includes(-1));
+  assert.deepEqual(
+    [...order].sort((a, b) => a - b),
+    order,
+  );
+  const install = stepText(codex, '- name: Install Codex');
+  assert.match(install, /\n {10}CODEX_VERSION: \d+\.\d+\.\d+\n/u);
+  assert.match(install, /\n {10}npm install -g "@openai\/codex@\$CODEX_VERSION"\n/u);
+  // No later step can regain root, as with codex-action's drop-sudo.
+  assert.match(install, /\n {10}sudo rm -f \/etc\/sudoers\.d\/runner\n {10}if sudo -n true 2>\/dev\/null; then\n/u);
+  assert.equal(codex.slice(codex.indexOf('sudo rm -f') + 'sudo rm -f'.length).match(/\bsudo (?!-n true)/gu), null);
+  const run = stepText(codex, providers.codex.step);
+  assert.match(run, /\n {10}MODEL: [\w.-]+\n/u);
+  assert.match(run, / -c 'default_permissions=":read-only"' /u);
+  // Codex passes its whole environment to commands unless told otherwise.
+  const filter = " -c 'shell_environment_policy.ignore_default_excludes=false' ";
+  assert.ok(run.includes(filter));
+  assert.doesNotMatch(
+    run,
+    /--sandbox|--full-auto|--dangerously|danger-full-access|shell_environment_policy\.(?:inherit|set)/u,
+  );
+  assert.match(run, /\n {10}CODEX_ACCESS_TOKEN: \$\{\{ secrets\.codex_access_token \}\}\n/u);
+  // The canary runs under the same profile and filter as the review's commands.
+  const canary = stepText(codex, "- name: Check that Codex's commands cannot read its environment");
+  assert.ok(canary.includes(`CANARY_TOKEN=$canary bash -c "codex${filter.trimEnd()} \\\n`));
+  assert.match(canary, / sandbox -P ':read-only' -- sh -c '.*cat \/proc\/\[0-9\]\*\/environ'; exit \\\$\?"/u);
+  assert.match(canary, /\*"\$canary"\*\) echo "::error::.*" && exit 1 ;;\n/u);
+});
+
+test('every reviewer job refuses bots outside allowed_bots', () => {
+  const jobs = jobsOf(reviewWorkflow());
+  // start() leaves bots to the reviewers, so a job without this would review any bot.
+  for (const name of reviewerJobs(jobs)) assert.match(jobs[name], providers[name].bots, name);
+});
+
+test('the codex job refuses bots outside allowed_bots, as the claude job does', () => {
+  const { codex } = jobsOf(reviewWorkflow());
+  const steps = stepsOf(codex);
+  assert.ok(steps.indexOf('- name: Require an allowed bot') < steps.indexOf('- id: codex'));
+  const step = stepText(codex, '- name: Require an allowed bot');
+  assert.match(step, /\n {8}if: endsWith\(github\.actor, '\[bot\]'\)\n/u);
+  assert.match(step, /\n {10}ACTOR: \$\{\{ github\.actor \}\}\n {10}ALLOWED: \$\{\{ inputs\.allowed_bots \}\}\n/u);
+  const script = step.slice(step.indexOf('run: |\n') + 'run: |\n'.length).replaceAll(/^ {10}/gmu, '');
+  const runs = (actor, allowed) =>
+    spawnSync('bash', ['-c', script], { env: { PATH: process.env.PATH, ACTOR: actor, ALLOWED: allowed } }).status;
+  const listed = 'dependabot[bot], Kong-Volcano-App';
+  assert.equal(runs('dependabot[bot]', listed), 0);
+  assert.equal(runs('kong-volcano-app[bot]', listed), 0);
+  assert.equal(runs('Dependabot[bot]', listed), 0);
+  assert.equal(runs('renovate[bot]', listed), 1);
+  assert.equal(runs('dependabot', listed), 1);
+  assert.equal(runs('renovate[bot]', ' * '), 0);
+  assert.equal(runs('renovate[bot]', 'dependabot[bot],\nrenovate[bot]\n'), 0);
+  assert.equal(runs('renovate[bot]', ''), 1);
 });
 
 test('one verdict job publishes every reviewer once any of them finishes', () => {

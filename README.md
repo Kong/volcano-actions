@@ -52,8 +52,9 @@ single review that names no reviewer or provider, however many ran:
 To add a provider, change only the workflow; the verdict reads any number of
 reviewers:
 
-1. Add a job to `ai-review.yml` like `claude` and `codex`. It requires its API
-   key, checks out the base, runs the action with `step: prepare`, and then
+1. Add a job to `ai-review.yml` like `claude` and `codex`. It requires its
+   credential, refuses bots outside `allowed_bots` (start leaves bots to the
+   reviewers), checks out the base, runs the action with `step: prepare`, and then
    runs the provider with prepare's `policy` and `schema` (or
    `schema-without-max-length`) and its own prompt lines. Its outputs are
    `reviewer`, the name the run log uses; `model`, the model its inline
@@ -63,8 +64,8 @@ reviewers:
    output would reach publish through an environment variable, which holds at
    most 128 KiB.
 2. List the job in the `verdict` job's `needs`.
-3. Add its API key to the workflow's secrets, with `required: false`, and to
-   the caller stubs below.
+3. Add its credential to the workflow's secrets, with `required: false`, and
+   to the caller stubs below.
 4. Add the job to the provider list in
    `.github/actions/ai-review/reviewer-jobs.test.cjs`, whose tests hold every
    reviewer job to these rules.
@@ -120,9 +121,10 @@ CODEOWNERS line.
 
 To add it to a repository:
 
-1. Make the `ANTHROPIC_CI_API_KEY` and `OPENAI_CI_API_KEY` secrets available
-   to the repository's Actions, as organization or repository secrets. The
-   stubs below pass them to the review, which calls Claude and Codex with them.
+1. Make the `ANTHROPIC_CI_API_KEY` and `CODEX_CI_ACCESS_TOKEN` secrets
+   available to the repository's Actions, as organization or repository
+   secrets. The stubs below pass them to the review, which calls Claude with
+   the API key and runs Codex with the ChatGPT workspace access token.
 2. Protect `main` and require the `ai-review/verdict` status on it, with
    GitHub Actions as the expected source. Otherwise anyone with write access
    can satisfy it by posting a status with their own token.
@@ -151,7 +153,7 @@ To add it to a repository:
          statuses: write
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
-         openai_api_key: ${{ secrets.OPENAI_CI_API_KEY }}
+         codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
    ```
 
    And `.github/workflows/ai-review-retarget-override.yml`:
@@ -176,7 +178,7 @@ To add it to a repository:
          statuses: write
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
-         openai_api_key: ${{ secrets.OPENAI_CI_API_KEY }}
+         codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
    ```
 
    Every title, body, or label edit fires `edited` or `labeled`. The PR page

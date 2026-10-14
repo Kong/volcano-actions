@@ -14,7 +14,7 @@
 # person.
 #
 # To add a provider, add a job like `claude` and `codex`, list it in
-# `verdict.needs`, and add its API key secret to workflow_call.
+# `verdict.needs`, and add its credential secret to workflow_call.
 #
 # - The policy (.github/actions/ai-review/policy.md) defines each level by
 #   what happens if it is not fixed and never says which levels fail, so a
@@ -23,7 +23,7 @@
 #   skip. Each reviewer job adds only how its provider reads and returns its
 #   verdict; the verdict job posts every reviewer's comments.
 # - pull_request_target runs as the caller's base branch, which supplies the
-#   stub and the API key secrets it passes. Every job skips on any other
+#   stub and the credential secrets it passes. Every job skips on any other
 #   trigger.
 # - A PR cannot edit its judge: the caller reads its stub from the base branch,
 #   and this workflow and .github/actions/ai-review come from trusted
@@ -72,15 +72,20 @@ on:
       # GitHub makes it read-only only when the PR's base branch was created by
       # Dependabot, and callers review PRs into main.
       allowed_bots:
-        description: Bots whose PRs are reviewed. The providers' actions refuse other bots, which errors the verdict.
+        description: Bots whose PRs are reviewed. Each reviewer job refuses other bots.
         type: string
         default: dependabot[bot],kong[bot],kong-volcano-app[bot]
     secrets:
       anthropic_api_key:
         description: The Anthropic API key the claude job calls Claude with. Every caller passes it; the claude job fails without it.
         required: false
+      codex_access_token:
+        description: The ChatGPT workspace access token the codex job runs Codex with. Every caller passes it; the codex job fails without it.
+        required: false
+      # Callers passed this before codex_access_token. Passing an undeclared
+      # secret fails the caller's run, so it stays until no stub passes it.
       openai_api_key:
-        description: The OpenAI API key the codex job calls Codex with. Every caller passes it; the codex job fails without it.
+        description: Unused. Pass codex_access_token instead.
         required: false
 
 permissions: {}
@@ -141,7 +146,7 @@ jobs:
       # leaves the head with no verdict that an approval or override could
       # clear. Failing here leaves the verdict to the other reviewers, or makes
       # it an error when none completes.
-      - name: Require the API key
+      - name: Require the credential
         env:
           KEY_SET: ${{ secrets.anthropic_api_key != '' }}
         run: |
@@ -246,16 +251,35 @@ jobs:
       model: gpt-6.1-sol
       candidates: ${{ steps.prepare.outputs.candidates }}
     steps:
-      # A missing key fails this job, which leaves the verdict to the other
-      # reviewers.
-      - name: Require the API key
+      # A missing credential fails this job, which leaves the verdict to the
+      # other reviewers.
+      - name: Require the credential
         env:
-          KEY_SET: ${{ secrets.openai_api_key != '' }}
+          KEY_SET: ${{ secrets.codex_access_token != '' }}
         run: |
           if [ "$KEY_SET" != true ]; then
-            echo "::error::The caller must pass the openai_api_key secret, for example from OPENAI_CI_API_KEY."
+            echo "::error::The caller must pass the codex_access_token secret, for example from CODEX_CI_ACCESS_TOKEN."
             exit 1
           fi
+      # start() leaves bots to the reviewers. This matches allowed_bots as the
+      # claude job's action does: `*` allows every bot, names ignore case, and
+      # the [bot] suffix is optional.
+      - name: Require an allowed bot
+        if: endsWith(github.actor, '[bot]')
+        env:
+          ACTOR: ${{ github.actor }}
+          ALLOWED: ${{ inputs.allowed_bots }}
+        run: |
+          # Bot names hold no whitespace, so a multiline list splits like one line.
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'; }
+          actor=$(lower "$ACTOR")
+          IFS=, read -ra bots <<< "$(lower "$ALLOWED")"
+          for bot in "${bots[@]}"; do
+            [ "$bot" = '*' ] && exit 0
+            [ "${bot%"[bot]"}[bot]" = "$actor" ] && exit 0
+          done
+          echo "::error::$ACTOR is not in allowed_bots."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
@@ -277,27 +301,50 @@ jobs:
           done
           rm -f "$RUNNER_TEMP"/git-credentials-*.config
           git config --local --unset-all http.https://github.com/.extraheader || true
+      # codex-action authenticates only with an API key, so the job runs the
+      # CLI itself. Its sandbox needs the unprivileged user namespaces that
+      # GitHub's Ubuntu image restricts. Then the runner gives up sudo, as
+      # codex-action's drop-sudo did, since Codex holds the token.
+      - name: Install Codex
+        env:
+          CODEX_VERSION: 0.162.1
+        run: |
+          npm install -g "@openai/codex@$CODEX_VERSION"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo rm -f /etc/sudoers.d/runner
+          if sudo -n true 2>/dev/null; then
+            echo "::error::The runner still has sudo."
+            exit 1
+          fi
+      # Codex's commands see only a fresh /proc, and so none of this job's
+      # processes, unless the sandbox cannot mount one: then it silently keeps
+      # the host's, where the token sits in the environment of Codex itself.
+      # A canary named like a token takes the token's place, in a shell and
+      # Codex both started with it, as the review step's are. `exit` keeps
+      # bash from exec'ing Codex in its place.
+      - name: Check that Codex's commands cannot read its environment
+        run: |
+          canary=$(openssl rand -hex 16)
+          errors="$RUNNER_TEMP/codex-sandbox-errors.txt"
+          seen=$(CANARY_TOKEN=$canary bash -c "codex -c 'shell_environment_policy.ignore_default_excludes=false' \
+            sandbox -P ':read-only' -- sh -c 'echo sandboxed; cat /proc/[0-9]*/environ'; exit \$?" 2>"$errors" | tr '\0' '\n' || true)
+          case "$seen" in
+            *"$canary"*) echo "::error::Codex's sandboxed commands can read the environment Codex runs in." && exit 1 ;;
+            *sandboxed*) ;;
+            *) tail -n 20 "$errors" && echo "::error::Codex's sandbox did not run." && exit 1 ;;
+          esac
       - id: codex
         # A job timeout reports `cancelled` and would leave the head pending,
         # where no override applies; a step timeout fails the job instead.
         timeout-minutes: 40
-        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1.13
-        with:
-          openai-api-key: ${{ secrets.openai_api_key }}
-          codex-version: 0.162.1
+        env:
+          CODEX_ACCESS_TOKEN: ${{ secrets.codex_access_token }}
           # Named, so a model change shows in review rather than with a CLI bump.
-          model: gpt-6.1-sol
-          # No writes and no network. The default drop-sudo safety strategy
-          # keeps the key in a proxy Codex cannot reach.
-          permission-profile: ':read-only'
-          effort: xhigh
-          # The action refuses runs by users without write access; these bots
-          # open and push the calling repository's own PRs.
-          allow-bot-users: ${{ inputs.allowed_bots }}
+          MODEL: gpt-6.1-sol
           # Structured outputs reject maxLength; publish caps the lengths instead.
-          output-schema: ${{ steps.prepare.outputs.schema-without-max-length }}
-          output-file: ${{ runner.temp }}/ai-review-codex.json
-          prompt: |
+          SCHEMA: ${{ steps.prepare.outputs.schema-without-max-length }}
+          REVIEW: ${{ runner.temp }}/ai-review-codex.json
+          PROMPT: |
             ${{ steps.prepare.outputs.policy }}
 
             The working directory's AGENTS.md files are the repository's
@@ -308,6 +355,17 @@ jobs:
             that matches the output schema. List every finding that applies to
             the current diff. Return an empty findings list if there are none,
             and decide human_review for the change at this head.
+        # Commands Codex runs get no writes, no network, and no variable named
+        # like a key, secret, or token, since Codex holds the access token.
+        run: |
+          printf '%s' "$SCHEMA" > "$RUNNER_TEMP/codex-schema.json"
+          printf '%s' "$PROMPT" | codex exec --ephemeral --skip-git-repo-check \
+            --model "$MODEL" \
+            -c 'model_reasoning_effort="xhigh"' \
+            -c 'default_permissions=":read-only"' \
+            -c 'shell_environment_policy.ignore_default_excludes=false' \
+            --output-schema "$RUNNER_TEMP/codex-schema.json" \
+            -o "$REVIEW" -
       # A step timeout fails the job rather than cancelling it.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         timeout-minutes: 2

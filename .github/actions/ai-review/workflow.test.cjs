@@ -49,7 +49,7 @@ test('the workflow keeps every reviewer inside its trust boundary', () => {
     assert.match(jobs[name], /github\.event_name == 'pull_request_target'/u, name);
   assert.match(workflow, /\npermissions: \{\}\n/u);
 
-  // Forks never reach the jobs that hold the API keys.
+  // Forks never reach the jobs that hold the credentials.
   assert.match(jobs.start, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/u);
   for (const name of reviewerJobs(jobs)) {
     assert.match(jobs[name], /\n {4}needs: start\n {4}if: needs\.start\.outputs\.review == 'true'\n/u, name);
@@ -58,7 +58,6 @@ test('the workflow keeps every reviewer inside its trust boundary', () => {
   assert.doesNotMatch(workflow, /pull_request\.draft/u);
   assert.match(jobs.claude, /CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'/u);
   assert.match(jobs.claude, /\n {10}allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/u);
-  assert.match(jobs.codex, /\n {10}allow-bot-users: \$\{\{ inputs\.allowed_bots \}\}\n/u);
   assert.match(
     workflow,
     /\n {6}allowed_bots:\n(?: {8}.*\n)*? {8}default: dependabot\[bot\],kong\[bot\],kong-volcano-app\[bot\]\n/u,
@@ -66,11 +65,13 @@ test('the workflow keeps every reviewer inside its trust boundary', () => {
   assert.doesNotMatch(workflow, /id-token/u);
 });
 
-test('every reviewer key is an optional secret the caller passes', () => {
+test('every reviewer credential is an optional secret the caller passes', () => {
   const workflow = reviewWorkflow();
-  for (const secret of ['anthropic_api_key', 'openai_api_key']) {
+  for (const secret of ['anthropic_api_key', 'codex_access_token', 'openai_api_key']) {
     assert.match(workflow, new RegExp(`\\n {6}${secret}:\\n(?: {8}.*\\n)*? {8}required: false\\n`, 'u'), secret);
   }
+  // Declared only so stubs that still pass it keep running.
+  assert.doesNotMatch(workflow, /secrets\.openai_api_key/u);
   assert.doesNotMatch(workflow, /anthropic_(?:federation_rule|organization|service_account|workspace)_id/u);
 });
 

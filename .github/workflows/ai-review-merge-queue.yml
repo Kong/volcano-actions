@@ -4,7 +4,7 @@
 # another review.
 # Callers run this from a merge_group workflow apart from their ai-review.yml
 # caller, so merge-group runs hold only `statuses: write` and never receive
-# the API keys.
+# the credentials.
 
 name: AI Review (merge queue)
 
