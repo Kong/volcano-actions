@@ -11,7 +11,8 @@
 # history in the changed files. ai-review-human.yml re-sets it when reviews or
 # that label change. Reviewers that do not complete leave the verdict to those
 # that did; when none does, the verdict is an error and the head waits for a
-# person.
+# person. A run that reviews nothing, because start skipped the head or
+# failed, publishes no verdict.
 #
 # To add a provider, add a job like `claude` and `codex`, list it in
 # `verdict.needs`, and add its credential secret to workflow_call.
@@ -122,7 +123,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
+        uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
         with:
           step: start
 
@@ -169,7 +170,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
+        uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -288,7 +289,7 @@ jobs:
           persist-credentials: true
       # Writes the same inputs as the claude job, before the credentials go.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
+        uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -376,8 +377,11 @@ jobs:
 
   verdict:
     needs: [claude, codex]
-    # Publishes once every reviewer job ends, if any succeeded or failed. A run
-    # cancelled before any finished publishes nothing; its SHA stays pending.
+    # Runs once every reviewer job ends. A job-level `if` also sees start's
+    # result in `needs`, so this passes whenever start succeeded or failed.
+    # publish sets nothing when every reviewer was skipped or cancelled: a
+    # draft gets no verdict, and a cancelled run, or a start that failed after
+    # setting pending, leaves its SHA pending.
     if: always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'failure'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -397,7 +401,7 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
+      - uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
@@ -417,6 +421,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
+      - uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
         with:
           step: override
