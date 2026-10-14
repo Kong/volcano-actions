@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { spawnSync } = require('node:child_process');
 const { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
 
 // Each reviewer job's provider step, the credential secret it calls with, and
@@ -116,10 +117,19 @@ test('the codex job reviews with read access only and drops the credentials befo
   assert.match(drop, /--unset-all "\$key"/u);
 });
 
-test('Codex runs pinned and read-only, and its commands cannot read the token', () => {
+test('Codex runs pinned and read-only, with no credential in its commands', () => {
   const { codex } = jobsOf(reviewWorkflow());
   const steps = stepsOf(codex);
-  assert.ok(steps.indexOf('- name: Install Codex') < steps.indexOf('- id: codex'));
+  const order = [
+    '- name: Install Codex',
+    "- name: Check that Codex's commands cannot read its environment",
+    '- id: codex',
+  ].map((m) => steps.indexOf(m));
+  assert.ok(!order.includes(-1));
+  assert.deepEqual(
+    [...order].sort((a, b) => a - b),
+    order,
+  );
   const install = stepText(codex, '- name: Install Codex');
   assert.match(install, /\n {10}CODEX_VERSION: \d+\.\d+\.\d+\n/u);
   assert.match(install, /\n {10}npm install -g "@openai\/codex@\$CODEX_VERSION"\n/u);
@@ -127,13 +137,34 @@ test('Codex runs pinned and read-only, and its commands cannot read the token', 
   assert.match(run, /\n {10}MODEL: [\w.-]+\n/u);
   assert.match(run, / -c 'default_permissions=":read-only"' /u);
   // Codex passes its whole environment to commands unless told otherwise.
-  assert.match(run, / -c 'shell_environment_policy\.ignore_default_excludes=false' /u);
+  const filter = " -c 'shell_environment_policy.ignore_default_excludes=false' ";
+  assert.ok(run.includes(filter));
   assert.doesNotMatch(
     run,
     /--sandbox|--full-auto|--dangerously|danger-full-access|shell_environment_policy\.(?:inherit|set)/u,
   );
-  // GitHub drops a job output that contains the token, so a leaked token never reaches the verdict job.
   assert.match(run, /\n {10}CODEX_ACCESS_TOKEN: \$\{\{ secrets\.codex_access_token \}\}\n/u);
+  // The canary runs under the same profile and filter as the review's commands.
+  const canary = stepText(codex, "- name: Check that Codex's commands cannot read its environment");
+  assert.ok(canary.includes(`CANARY_TOKEN=$canary codex${filter.trimEnd()} \\\n`));
+  assert.match(canary, / sandbox -P ':read-only' -- sh -c '.*cat \/proc\/\[0-9\]\*\/environ'/u);
+  assert.match(canary, /\*"\$canary"\*\) echo "::error::.*" && exit 1 ;;\n/u);
+});
+
+test('the codex job refuses bots outside allowed_bots, as the claude job does', () => {
+  const { codex } = jobsOf(reviewWorkflow());
+  const steps = stepsOf(codex);
+  assert.ok(steps.indexOf('- name: Require an allowed bot') < steps.indexOf('- id: codex'));
+  const step = stepText(codex, '- name: Require an allowed bot');
+  assert.match(step, /\n {8}if: endsWith\(github\.actor, '\[bot\]'\)\n/u);
+  assert.match(step, /\n {10}ACTOR: \$\{\{ github\.actor \}\}\n {10}ALLOWED: \$\{\{ inputs\.allowed_bots \}\}\n/u);
+  const script = step.slice(step.indexOf('run: |\n') + 'run: |\n'.length).replaceAll(/^ {10}/gmu, '');
+  const allowed = 'dependabot[bot], kong-volcano-app';
+  const runs = (actor) => spawnSync('bash', ['-c', script], { env: { ACTOR: actor, ALLOWED: allowed } }).status;
+  assert.equal(runs('dependabot[bot]'), 0);
+  assert.equal(runs('kong-volcano-app[bot]'), 0);
+  assert.equal(runs('renovate[bot]'), 1);
+  assert.equal(runs('dependabot'), 1);
 });
 
 test('one verdict job publishes every reviewer once any of them finishes', () => {

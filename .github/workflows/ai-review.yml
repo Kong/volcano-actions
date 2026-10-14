@@ -67,7 +67,7 @@ on:
       # GitHub makes it read-only only when the PR's base branch was created by
       # Dependabot, and callers review PRs into main.
       allowed_bots:
-        description: Bots whose PRs are reviewed. The claude job's action refuses other bots.
+        description: Bots whose PRs are reviewed. Each reviewer job refuses other bots.
         type: string
         default: dependabot[bot],kong[bot],kong-volcano-app[bot]
     secrets:
@@ -244,6 +244,21 @@ jobs:
             echo "::error::The caller must pass the codex_access_token secret, for example from CODEX_CI_ACCESS_TOKEN."
             exit 1
           fi
+      # start() leaves bots to the reviewers; the claude job's action refuses
+      # those outside allowed_bots, as codex-action did.
+      - name: Require an allowed bot
+        if: endsWith(github.actor, '[bot]')
+        env:
+          ACTOR: ${{ github.actor }}
+          ALLOWED: ${{ inputs.allowed_bots }}
+        run: |
+          IFS=, read -ra bots <<< "$ALLOWED"
+          for bot in "${bots[@]}"; do
+            bot=${bot// /}
+            [ "${bot%"[bot]"}[bot]" = "$ACTOR" ] && exit 0
+          done
+          echo "::error::$ACTOR is not in allowed_bots."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
@@ -274,6 +289,20 @@ jobs:
         run: |
           npm install -g "@openai/codex@$CODEX_VERSION"
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # Codex's commands see only a fresh /proc, and so none of this job's
+      # processes, unless the sandbox cannot mount one: then it silently keeps
+      # the host's, where the token sits in the environment of Codex itself.
+      # A canary named like a token takes the token's place.
+      - name: Check that Codex's commands cannot read its environment
+        run: |
+          canary=$(openssl rand -hex 16)
+          seen=$(CANARY_TOKEN=$canary codex -c 'shell_environment_policy.ignore_default_excludes=false' \
+            sandbox -P ':read-only' -- sh -c 'echo sandboxed; cat /proc/[0-9]*/environ' 2>/dev/null | tr '\0' '\n' || true)
+          case "$seen" in
+            *"$canary"*) echo "::error::Codex's sandboxed commands can read the environment Codex runs in." && exit 1 ;;
+            *sandboxed*) ;;
+            *) echo "::error::Codex's sandbox did not run." && exit 1 ;;
+          esac
       - id: codex
         # A job timeout reports `cancelled` and would leave the head pending,
         # where no override applies; a step timeout fails the job instead.
