@@ -58,8 +58,11 @@ reviewers:
    runs the provider with prepare's `policy` and `schema` (or
    `schema-without-max-length`) and its own prompt lines. Its outputs are
    `reviewer`, the name the run log uses; `model`, the model its inline
-   comments name; `findings`, its structured output; and `candidates`, from
-   prepare.
+   comments name; and `candidates`, from prepare. It writes its structured
+   output to `ai-review-<job ID>.json` and uploads that file alone as the
+   artifact `ai-review-<job ID>`, which the verdict job downloads. A job
+   output would reach publish through an environment variable, which holds at
+   most 128 KiB.
 2. List the job in the `verdict` job's `needs`.
 3. Add its credential to the workflow's secrets, with `required: false`, and
    to the caller stubs below.

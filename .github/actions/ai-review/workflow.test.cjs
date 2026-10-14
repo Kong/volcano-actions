@@ -6,9 +6,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { statusContext, overrideLabel, humanLabel } = require('./ai-review.cjs');
-const { root, readRepo, sha, url, client, context, core } = require('./test-helpers.cjs');
+const {
+  root,
+  readRepo,
+  sha,
+  url,
+  finding,
+  reviewJson,
+  clearAfter,
+  client,
+  context,
+  core,
+} = require('./test-helpers.cjs');
 const { tempDir } = require('./test-git.cjs');
-const { reviewWorkflow, action, jobsOf, reviewerJobs } = require('./test-workflow.cjs');
+const { reviewWorkflow, action, jobsOf, stepText, reviewerJobs } = require('./test-workflow.cjs');
 
 const humanWorkflow = () => readRepo('.github/workflows/ai-review-human.yml');
 
@@ -83,14 +94,18 @@ test('only events for one head share a review run group', () => {
 test('jobs with a write token never check out the PR, and Claude reads it with no shell', () => {
   const jobs = jobsOf(reviewWorkflow());
   // The jobs holding a write token load the script from this repository's
-  // pinned revision and never check out the PR.
+  // pinned revision and never check out the PR. The verdict job reads the
+  // reviews' artifacts first, as data.
   for (const [name, step] of [
     ['start', 'start'],
     ['verdict', 'publish'],
     ['override', 'override'],
   ]) {
     assert.doesNotMatch(jobs[name], /actions\/checkout|github-script/u, name);
-    assert.deepEqual(jobs[name].match(/(?<![\w-])uses: .*/gu), [`uses: ${action}`], name);
+    const uses = jobs[name].match(/(?<![\w-])uses: .*/gu);
+    const download = name === 'verdict' ? [uses[0]] : [];
+    assert.deepEqual(uses, [...download, `uses: ${action}`], name);
+    for (const ref of download) assert.match(ref, /^uses: actions\/download-artifact@[a-f0-9]{40} # /u);
     assert.match(jobs[name], new RegExp(`\\n {10}step: ${step}\\n`, 'u'), name);
   }
   assert.match(jobs.claude, /--allowedTools "Read,Grep,Glob"\n/u);
@@ -174,6 +189,28 @@ test('the pinned action matches its schema and the documented override policy', 
   assert.deepEqual(decide(false).reasons, []);
   assert.deepEqual(decide(true).reasons, ['Changes billing.']);
   assert.deepEqual(decide(true).reviewer, { login: 'bob', why: 'wrote billing' });
+});
+
+// The verdict job hands the pinned action what each reviewer job uploads.
+test('the pinned action reads the output each reviewer job uploads', async (t) => {
+  const { pinned } = pinnedAction(t);
+  const jobs = jobsOf(reviewWorkflow());
+  const dir = tempDir(t, 'ai-review-outputs-');
+  const needs = {};
+  for (const name of reviewerJobs(jobs)) {
+    const upload = stepText(jobs[name], 'actions/upload-artifact@');
+    const file = upload.match(/\n {10}path: \$\{\{ runner\.temp \}\}\/(\S+)\n/u)[1];
+    fs.writeFileSync(path.join(dir, file), reviewJson({ findings: [finding('p3', { title: name })] }));
+    needs[name] = { result: 'success', outputs: { reviewer: name } };
+  }
+  clearAfter(t, 'REVIEWS', 'REVIEW_OUTPUTS');
+  process.env.REVIEWS = JSON.stringify(needs);
+  process.env.REVIEW_OUTPUTS = dir;
+  const c = client();
+  const k = core();
+  await pinned.publish({ github: c.github, context: context(), core: k });
+  assert.deepEqual(k.warnings, []);
+  assert.deepEqual(c.set(statusContext), [[sha, 'success', 'No P0-P2 findings (2 P3, 0 pre-existing).']]);
 });
 
 // Reviews run the PR's own copy of their workflow, so the gate runs only from

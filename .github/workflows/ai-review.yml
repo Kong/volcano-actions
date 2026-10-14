@@ -44,6 +44,11 @@
 # - The codex job gives Codex the same prepared inputs in a read-only sandbox
 #   with no network and no write token, and drops the checkout's credentials
 #   before Codex starts, since it can read any file on the runner.
+# - Each reviewer job uploads only its structured output, as the artifact
+#   `ai-review-<job ID>`, and the verdict job downloads them all. A job output
+#   would reach publish through an environment variable, which holds at most
+#   128 KiB, and Codex's output has no length limit. A missing or unreadable
+#   output leaves that review incomplete.
 # - Statuses are per-SHA, so skipped runs never overwrite a verdict, a failed
 #   review is `error`, and a cancelled one stays `pending`.
 # - `ai-review-override` passes one head over a failing verdict (or a fork),
@@ -117,7 +122,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@81b0efcbb5298d80902493ca739534d8b493d353
+        uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
         with:
           step: start
 
@@ -135,7 +140,6 @@ jobs:
       reviewer: Claude
       # The verdict job names it in the footer of each inline comment.
       model: claude-opus-5-5
-      findings: ${{ steps.claude.outputs.structured_output }}
       candidates: ${{ steps.prepare.outputs.candidates }}
     steps:
       # A required secret that is unset fails the run before start, which
@@ -165,7 +169,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@81b0efcbb5298d80902493ca739534d8b493d353
+        uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -218,6 +222,20 @@ jobs:
             --strict-mcp-config
             --allowedTools "Read,Grep,Glob"
             --disallowedTools "Bash,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch"
+      # Only the structured output leaves the runner; the execution file holds
+      # everything Claude read.
+      - name: Save the review
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          REVIEW: ${{ runner.temp }}/ai-review-claude.json
+        run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output' "$EXECUTION_FILE" > "$REVIEW"
+      # A step timeout fails the job rather than cancelling it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 2
+        with:
+          name: ai-review-claude
+          path: ${{ runner.temp }}/ai-review-claude.json
+          if-no-files-found: error
 
   codex:
     needs: start
@@ -231,7 +249,6 @@ jobs:
     outputs:
       reviewer: Codex
       model: gpt-6.1-sol
-      findings: ${{ steps.codex.outputs.final-message }}
       candidates: ${{ steps.prepare.outputs.candidates }}
     steps:
       # A missing credential fails this job, which leaves the verdict to the
@@ -271,7 +288,7 @@ jobs:
           persist-credentials: true
       # Writes the same inputs as the claude job, before the credentials go.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@81b0efcbb5298d80902493ca739534d8b493d353
+        uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -326,6 +343,7 @@ jobs:
           MODEL: gpt-6.1-sol
           # Structured outputs reject maxLength; publish caps the lengths instead.
           SCHEMA: ${{ steps.prepare.outputs.schema-without-max-length }}
+          REVIEW: ${{ runner.temp }}/ai-review-codex.json
           PROMPT: |
             ${{ steps.prepare.outputs.policy }}
 
@@ -347,14 +365,14 @@ jobs:
             -c 'default_permissions=":read-only"' \
             -c 'shell_environment_policy.ignore_default_excludes=false' \
             --output-schema "$RUNNER_TEMP/codex-schema.json" \
-            -o "$RUNNER_TEMP/codex-verdict.json" -
-          delimiter="EOF_$(openssl rand -hex 16)"
-          {
-            echo "final-message<<$delimiter"
-            cat "$RUNNER_TEMP/codex-verdict.json"
-            echo
-            echo "$delimiter"
-          } >> "$GITHUB_OUTPUT"
+            -o "$REVIEW" -
+      # A step timeout fails the job rather than cancelling it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 2
+        with:
+          name: ai-review-codex
+          path: ${{ runner.temp }}/ai-review-codex.json
+          if-no-files-found: error
 
   verdict:
     needs: [claude, codex]
@@ -368,11 +386,22 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
+      # A failed or hung download must not stop publish, which would leave the
+      # head pending; a missing output leaves only that review incomplete.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          pattern: ai-review-*
+          # One directory, whether one artifact matches or several.
+          merge-multiple: true
+          path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@81b0efcbb5298d80902493ca739534d8b493d353
+      - uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
+          review-outputs: ${{ runner.temp }}/ai-review-outputs
           human-review-paths: ${{ inputs.human_review_paths }}
 
   override:
@@ -388,6 +417,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@81b0efcbb5298d80902493ca739534d8b493d353
+      - uses: Kong/volcano-actions/.github/actions/ai-review@979836af3f93e5b51feef4eb9590831fb0813436
         with:
           step: override

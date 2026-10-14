@@ -12,7 +12,10 @@ inputs:
     description: For prepare, extra review focus bullets appended to the policy's shared list.
     default: ''
   reviews:
-    description: For publish, the verdict job's `toJSON(needs)`, which must list only reviewer jobs. Every job in it is a reviewer, named by its `reviewer` output or its job ID. Its `findings` output is its structured output, and its `model` output, such as `claude-opus-5-5`, signs the inline comments publish posts for its findings, or its name does when unset.
+    description: For publish, the verdict job's `toJSON(needs)`, which must list only reviewer jobs. Every job in it is a reviewer, named by its `reviewer` output or its job ID. Its `model` output, such as `claude-opus-5-5`, signs the inline comments publish posts for its findings, or its name does when unset. Its structured output is a file in `review-outputs`.
+    default: ''
+  review-outputs:
+    description: For publish, the directory holding each reviewer job's structured output as `ai-review-<job ID>.json`, which the job uploads as the artifact `ai-review-<job ID>`. Download the artifacts with `merge-multiple` set, which puts every file directly in the directory. An output can outgrow the 128 KiB an environment variable holds, so it never travels as a job output. A job that succeeded without a readable file did not complete its review.
     default: ''
   human-review-paths:
     description: For publish, newline-separated globs of paths whose changes need a human review.
@@ -62,6 +65,7 @@ runs:
         INPUTS: ${{ runner.temp }}/ai-review
         FOCUS: ${{ inputs.focus }}
         REVIEWS: ${{ inputs.reviews }}
+        REVIEW_OUTPUTS: ${{ inputs.review-outputs }}
         HUMAN_REVIEW_PATHS: ${{ inputs.human-review-paths }}
       with:
         retries: 3
