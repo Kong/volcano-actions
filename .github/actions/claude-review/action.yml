@@ -20,6 +20,12 @@ inputs:
   reviewer-candidates:
     description: For publish, the candidates step's JSON list of logins.
     default: ''
+  codex-result:
+    description: For publish, the Codex review job's result. Leave it empty when the workflow runs no Codex review.
+    default: ''
+  codex-findings:
+    description: For publish, the Codex review's structured output, in the same shape as findings.
+    default: ''
 
 outputs:
   review:
@@ -42,6 +48,8 @@ runs:
         FINDINGS: ${{ inputs.findings }}
         HUMAN_REVIEW_PATHS: ${{ inputs.human-review-paths }}
         REVIEWER_CANDIDATES: ${{ inputs.reviewer-candidates }}
+        CODEX_RESULT: ${{ inputs.codex-result }}
+        CODEX_FINDINGS: ${{ inputs.codex-findings }}
       with:
         retries: 3
         script: |

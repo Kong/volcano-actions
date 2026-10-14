@@ -24,6 +24,15 @@ const finding = (severity, overrides = {}) => ({
 const output = (findings, summary = 'Adds a cache.', human) =>
   JSON.stringify({ summary, findings, ...(human && { human_review: human }) });
 const routine = { needed: false, reasons: [] };
+// A review's structured output in the full shape Claude's and Codex's share.
+const reviewJson = ({
+  summary = 'Adds a cache.',
+  findings = [],
+  human = routine,
+  notChecked = [],
+  closely = true,
+} = {}) =>
+  JSON.stringify({ summary, findings, human_review: human, not_checked: notChecked, reviewed_closely: closely });
 const review = (login, state, type = 'User', commit = sha) => ({ user: { login, type }, state, commit_id: commit });
 // The summary comment as publish leaves it for a head it decided.
 const decided = (reasons, head = sha, reviewer = null) => ({
@@ -228,6 +237,7 @@ module.exports = {
   finding,
   output,
   routine,
+  reviewJson,
   review,
   decided,
   clearAfter,
