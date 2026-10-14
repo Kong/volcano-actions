@@ -30,20 +30,19 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
   with the caller's `focus` applied, and the schema, along with a copy without
   `maxLength` for providers whose structured outputs reject it.
 - Each job adds only what its provider needs: how it reads files and returns
-  its verdict, and its own hardening. Claude reads the checkouts with no shell
-  and posts inline comments. Codex reads them in a read-only sandbox with no
-  network, after the job drops the checkout's credentials.
+  its verdict, and its own hardening. Claude reads the checkouts with no shell.
+  Codex reads them in a read-only sandbox with no network, after the job drops
+  the checkout's credentials. No reviewer job holds a write token; the verdict
+  job posts the comments.
 
 One verdict combines every reviewer, and the summary comment reads as a
 single review that names no reviewer or provider, however many ran:
 
 - A P0-P2 finding from any reviewer fails it. Any reviewer can ask for a
   person.
-- When several reviewers complete, a model call merges their reviews into one
-  summary and one findings list without repeats. The status, whether a person
-  is needed, and the suggested reviewer still come from every reviewer's own
-  output, so the merge cannot drop a blocker. Without a working key, the
-  reviews merge without a model.
+- The comment lists every reviewer's findings once. Each finding on a line also
+  gets an inline comment whose footer names the model that found it, so two
+  models reporting the same problem leave two comments.
 - When a provider has an outage or its review otherwise does not complete, the
   other reviewers' verdict stands, and the run log warns which one is missing.
   When none completes, the verdict is an error and the head waits for a
@@ -56,8 +55,9 @@ reviewers:
    key, checks out the base, runs the action with `step: prepare`, and then
    runs the provider with prepare's `policy` and `schema` (or
    `schema-without-max-length`) and its own prompt lines. Its outputs are
-   `reviewer`, the name the run log uses; `findings`, its structured output;
-   and `candidates`, from prepare.
+   `reviewer`, the name the run log uses; `model`, the model its inline
+   comments name; `findings`, its structured output; and `candidates`, from
+   prepare.
 2. List the job in the `verdict` job's `needs`.
 3. Add its API key to the workflow's secrets, with `required: false`, and to
    the caller stubs below.

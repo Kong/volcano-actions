@@ -92,7 +92,7 @@ test('jobs with a write token never check out the PR, and Claude reads it with n
     assert.deepEqual(jobs[name].match(/(?<![\w-])uses: .*/gu), [`uses: ${action}`], name);
     assert.match(jobs[name], new RegExp(`\\n {10}step: ${step}\\n`, 'u'), name);
   }
-  assert.match(jobs.claude, /--allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment"\n/u);
+  assert.match(jobs.claude, /--allowedTools "Read,Grep,Glob"\n/u);
   assert.match(jobs.claude, /--disallowedTools "Bash,/u);
   // Only the action's own MCP servers start; a caller's .mcp.json does not.
   assert.match(jobs.claude, /\n {12}--strict-mcp-config\n/u);

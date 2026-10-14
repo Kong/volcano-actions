@@ -4,10 +4,11 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
 
-// Each reviewer job's provider step and the API key secret it calls with.
+// Each reviewer job's provider step, the API key secret it calls with, and
+// how that step names its model.
 const providers = {
-  claude: { step: '- id: claude', secret: 'anthropic_api_key' },
-  codex: { step: '- id: codex', secret: 'openai_api_key' },
+  claude: { step: '- id: claude', secret: 'anthropic_api_key', model: /\n {12}--model (\S+)\n/u },
+  codex: { step: '- id: codex', secret: 'openai_api_key', model: /\n {10}model: (\S+)\n/u },
 };
 const prepare = `- id: prepare\n        uses: ${action}\n        with:\n          step: prepare\n          focus: \${{ inputs.focus }}\n`;
 
@@ -18,16 +19,30 @@ test('every job with a reviewer output is in verdict.needs, and every job it nee
   assert.deepEqual(Object.keys(providers), needs);
 });
 
-test('every reviewer job names itself and reports its findings and candidates', () => {
+test('every reviewer job names itself and its model, and reports its findings and candidates', () => {
   const jobs = jobsOf(reviewWorkflow());
   for (const name of reviewerJobs(jobs)) {
     const outputs = outputsOf(jobs[name]);
-    assert.deepEqual(Object.keys(outputs), ['reviewer', 'findings', 'candidates'], name);
-    // A static name, which the summary comment shows.
+    assert.deepEqual(Object.keys(outputs), ['reviewer', 'model', 'findings', 'candidates'], name);
+    // A static name, which only the run log shows.
     assert.match(outputs.reviewer, /^[A-Z][\w ]*$/u, name);
+    // The model the provider step runs, which each inline comment's footer names.
+    assert.equal(outputs.model, stepText(jobs[name], providers[name].step).match(providers[name].model)?.[1], name);
     const id = providers[name].step.slice('- id: '.length);
     assert.match(outputs.findings, new RegExp(`^\\$\\{\\{ steps\\.${id}\\.outputs\\.[\\w-]+ \\}\\}$`, 'u'), name);
     assert.equal(outputs.candidates, '${{ steps.prepare.outputs.candidates }}', name);
+  }
+});
+
+test('no reviewer job holds a write token; the verdict job posts the comments', () => {
+  const jobs = jobsOf(reviewWorkflow());
+  for (const name of reviewerJobs(jobs)) {
+    assert.match(
+      jobs[name],
+      /\n {4}permissions:\n {6}contents: read\n(?: {6}#.*\n)* {6}pull-requests: read\n {4}outputs:/u,
+      name,
+    );
+    assert.doesNotMatch(jobs[name], /: write|mcp__/u, name);
   }
 });
 
@@ -71,13 +86,12 @@ test('every reviewer gets the shared policy first and a schema from prepare', ()
   // The schema rides in single quotes in claude_args; prepare's has none.
   assert.match(claude, /\n {12}--json-schema '\$\{\{ steps\.prepare\.outputs\.schema \}\}'\n/u);
   assert.match(claude, /\n {12}--add-dir \$\{\{ steps\.prepare\.outputs\.inputs \}\}\n/u);
-  assert.match(claude, /\$\{\{ steps\.prepare\.outputs\.inputs \}\}\/review-comments\.jsonl lists the\n/u);
-  assert.match(claude, /pass `\$\{\{ github\.event\.pull_request\.head\.sha \}\}` as `commit_id`/u);
+  // The verdict job posts every reviewer's inline comments.
+  assert.match(claude, /\n {12}Post no comments; the workflow publishes your structured output\.\n/u);
   const codex = stepText(jobs.codex, providers.codex.step);
   // OpenAI's structured outputs reject maxLength.
   assert.match(codex, /\n {10}output-schema: \$\{\{ steps\.prepare\.outputs\.schema-without-max-length \}\}\n/u);
-  // Codex posts no inline comments; its findings go in the summary comment.
-  assert.doesNotMatch(codex.slice(codex.indexOf('prompt: |')), /inline comment|mcp__|review-comments/u);
+  assert.doesNotMatch(codex.slice(codex.indexOf('prompt: |')), /inline comment|mcp__|commit_id/u);
 });
 
 test('a hung reviewer fails its job instead of leaving the head pending', () => {
@@ -124,8 +138,6 @@ test('one verdict job publishes every reviewer once any of them finishes', () =>
     'step: publish',
     'reviews: ${{ toJSON(needs) }}',
     'human-review-paths: ${{ inputs.human_review_paths }}',
-    'anthropic-api-key: ${{ secrets.anthropic_api_key }}',
-    'openai-api-key: ${{ secrets.openai_api_key }}',
   ]) {
     assert.ok(job.includes(`\n          ${line}\n`), line);
   }
