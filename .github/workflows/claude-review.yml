@@ -99,7 +99,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/claude-review@276216b4caacee90198c13e13777a26842f033d7
+        uses: Kong/volcano-actions/.github/actions/claude-review@07c54eff7e951791e71462ebe84f67aae12a9cd0
         with:
           step: start
 
@@ -192,7 +192,7 @@ jobs:
       # Writes reviewers.jsonl from the base branch's history of the changed
       # files, before Claude runs; the PR's own commits can name any author.
       - id: candidates
-        uses: Kong/volcano-actions/.github/actions/claude-review@276216b4caacee90198c13e13777a26842f033d7
+        uses: Kong/volcano-actions/.github/actions/claude-review@07c54eff7e951791e71462ebe84f67aae12a9cd0
         with:
           step: candidates
       - id: claude
@@ -404,7 +404,7 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/claude-review@276216b4caacee90198c13e13777a26842f033d7
+      - uses: Kong/volcano-actions/.github/actions/claude-review@07c54eff7e951791e71462ebe84f67aae12a9cd0
         with:
           step: publish
           review-result: ${{ needs.review.result }}
@@ -425,6 +425,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/claude-review@276216b4caacee90198c13e13777a26842f033d7
+      - uses: Kong/volcano-actions/.github/actions/claude-review@07c54eff7e951791e71462ebe84f67aae12a9cd0
         with:
           step: override
