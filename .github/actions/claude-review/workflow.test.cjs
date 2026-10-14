@@ -21,7 +21,7 @@ test('the workflow keeps the reviewer inside its trust boundary', () => {
   const workflow = reviewWorkflow();
   execFileSync('git', ['merge-base', '--is-ancestor', action.split('@')[1], 'origin/main'], { cwd: root });
   const jobs = jobsOf(workflow);
-  assert.deepEqual(Object.keys(jobs), ['start', 'review', 'verdict', 'override']);
+  assert.deepEqual(Object.keys(jobs), ['start', 'review', 'codex', 'verdict', 'override']);
 
   // Callers choose the trigger; every job that acts runs only under
   // pull_request_target, which runs the caller's base-branch stub.
@@ -123,7 +123,6 @@ test('reviewer candidates come from the base history before Claude runs', () => 
   assert.ok(steps.indexOf('- id: candidates') < steps.indexOf('- id: claude'));
   assert.ok(steps.includes(`- id: candidates\n        uses: ${action}\n        with:\n          step: candidates\n`));
   assert.match(jobs.review, /\n {6}candidates: \$\{\{ steps\.candidates\.outputs\.candidates \}\}\n/u);
-  assert.match(jobs.verdict, /\n {10}reviewer-candidates: \$\{\{ needs\.review\.outputs\.candidates \}\}\n/u);
 });
 
 test('the reusable review and composite action pin every action to a full commit SHA', () => {

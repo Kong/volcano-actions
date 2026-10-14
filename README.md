@@ -15,6 +15,14 @@ review. The label is removed after processing. Each new commit needs its own
 override. Volcano repositories call it instead of keeping their own copy, so a
 fix lands once.
 
+OpenAI's Codex reviews each head beside Claude, from the same inputs, in a
+read-only sandbox with no network. The verdict and the summary comment combine
+both reviews: a P0-P2 finding from either fails the verdict, and either can ask
+for a person. When one provider has an outage or its review otherwise does not
+complete, the other's verdict stands alone and the comment says so. When
+neither completes, the verdict is an error and the head waits for a person, as
+described below.
+
 It also reports `claude-review/human`, which says whether the head still needs
 a person's review. It waits for one when:
 
@@ -46,8 +54,8 @@ commit.
 Requiring this status instead of an approval lets a PR merge on Claude's review
 alone when nothing needs a person.
 
-If Claude's review does not complete, for example during an outage, the
-verdict is an error and the head needs a human review. An approval of that
+If neither review completes, for example during an outage of both providers,
+the verdict is an error and the head needs a human review. An approval of that
 exact commit by a collaborator with write access other than the author stands
 in for the review and passes both statuses; an approval of an earlier commit
 does not, since nobody read the new one. A verdict with findings still takes a
@@ -61,9 +69,9 @@ so a repository that opts in can drop a catch-all CODEOWNERS line.
 
 To add it to a repository:
 
-1. Make the `ANTHROPIC_CI_API_KEY` secret available to the repository's
-   Actions, as an organization or repository secret. The stubs below pass it
-   to the review, which calls Claude with it.
+1. Make the `ANTHROPIC_CI_API_KEY` and `OPENAI_CI_API_KEY` secrets available
+   to the repository's Actions, as organization or repository secrets. The
+   stubs below pass them to the review, which calls Claude and Codex with them.
 2. Protect `main` and require the `claude-review/verdict` status on it, with
    GitHub Actions as the expected source. Otherwise anyone with write access
    can satisfy it by posting a status with their own token.
@@ -92,6 +100,7 @@ To add it to a repository:
          statuses: write
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
+         openai_api_key: ${{ secrets.OPENAI_CI_API_KEY }}
    ```
 
    And `.github/workflows/claude-review-retarget-override.yml`:
@@ -116,6 +125,7 @@ To add it to a repository:
          statuses: write
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
+         openai_api_key: ${{ secrets.OPENAI_CI_API_KEY }}
    ```
 
    Every title, body, or label edit fires `edited` or `labeled`. The PR page

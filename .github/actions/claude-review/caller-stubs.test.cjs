@@ -55,7 +55,7 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
     );
     assert.match(
       stub,
-      /\n {4}permissions:\n {6}contents: read\n {6}pull-requests: write\n {6}statuses: write\n {4}secrets:\n {6}anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_CI_API_KEY \}\}\n$/u,
+      /\n {4}permissions:\n {6}contents: read\n {6}pull-requests: write\n {6}statuses: write\n {4}secrets:\n {6}anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_CI_API_KEY \}\}\n {6}openai_api_key: \$\{\{ secrets\.OPENAI_CI_API_KEY \}\}\n$/u,
       file,
     );
     assert.doesNotMatch(stub, /concurrency/u, file);
