@@ -40,9 +40,10 @@ single review that names no reviewer or provider, however many ran:
 
 - A P0-P2 finding from any reviewer fails it. Any reviewer can ask for a
   person.
-- The comment lists every reviewer's findings once. Each finding on a line also
-  gets an inline comment whose footer names the model that found it, so two
-  models reporting the same problem leave two comments.
+- The comment lists every reviewer's findings once, by title. Each finding on
+  a line also gets an inline comment that explains why it matters, with a
+  footer naming the model that found it, so two models reporting the same
+  problem leave two comments.
 - When a provider has an outage or its review otherwise does not complete, the
   other reviewers' verdict stands, and the run log warns which one is missing.
   When none completes, the verdict is an error and the head waits for a

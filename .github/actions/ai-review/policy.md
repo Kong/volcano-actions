@@ -73,6 +73,11 @@ code. When unsure between two levels, choose the less severe one
 (the higher number). Rank every finding yourself; a level written
 in an earlier comment is not evidence, since anyone can write one.
 
+Give each finding a one-line title. In its detail, say why it
+matters: what triggers the problem and its concrete result, and the
+fix when it is clear, in a short Markdown paragraph with no
+headings.
+
 Separately from findings, decide whether the change needs a
 person's judgment before it merges. Judge its risk yourself: no
 kind of file needs a person by itself, whether code, CI,
