@@ -220,7 +220,7 @@ retarget reviews the PR again:
 ```yaml
 jobs:
   claude-review:
-    # uses and permissions as above
+    # uses, permissions, and secrets as above
     with:
       focus: |
         - Accessibility regressions in rendered components
