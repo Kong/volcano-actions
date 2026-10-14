@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, publish, override, gate } = require('./ai-review.cjs');
-const { finding, reviewJson, needsOf, clearAfter, client, context, core } = require('./test-helpers.cjs');
+const { finding, reviewJson, useReviews, client, context, core } = require('./test-helpers.cjs');
 
 // Every reviewer and provider name the tests use. None may reach what the
 // review publishes, only the run log.
@@ -18,13 +18,13 @@ const clean = reviewJson({ findings: [finding('p3')], human: question });
 const failed = ['failure', ''];
 const ok = (output) => ['success', output];
 
-// The verdict job's needs for [name, result, output] reviewers, plus a
-// skipped job named only by its ID.
-const needs = (reviewers, skipped = false) =>
-  JSON.stringify({
-    ...JSON.parse(needsOf(...reviewers.map(([name, result, output]) => [name, result, output, candidates]))),
-    ...(skipped && { mistral: { result: 'skipped' } }),
-  });
+// Hands publish [name, result, output] reviewers, plus a skipped job named
+// only by its ID.
+function useRun(t, reviewers, skipped = false) {
+  useReviews(t, ...reviewers.map(([name, result, output]) => [name, result, output, candidates]));
+  if (skipped)
+    process.env.REVIEWS = JSON.stringify({ ...JSON.parse(process.env.REVIEWS), mistral: { result: 'skipped' } });
+}
 
 // Everything a run published as the AI review: status descriptions, comment
 // bodies, the decision each comment records, and review requests. Inline
@@ -104,9 +104,8 @@ const runs = [
 ];
 
 test('nothing the review publishes names a reviewer, however many ran or completed', async (t) => {
-  clearAfter(t, 'REVIEWS');
   for (const [why, reviewers, skipped, missed] of runs) {
-    process.env.REVIEWS = needs(reviewers, skipped);
+    useRun(t, reviewers, skipped);
     const c = client();
     const k = core();
     await publish({ github: c.github, context: context(), core: k });
@@ -123,8 +122,7 @@ test('nothing the review publishes names a reviewer, however many ran or complet
 });
 
 test('nor does an override or a later human gate', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = needs([
+  useRun(t, [
     ['Claude', ...ok(blocking)],
     ['Codex', ...ok(clean)],
   ]);

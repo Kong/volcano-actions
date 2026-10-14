@@ -179,7 +179,7 @@ async function publish({ github, context, core }) {
     );
     return;
   }
-  const { reviewers, candidates } = reviewersOf(process.env.REVIEWS);
+  const { reviewers, candidates } = reviewersOf(process.env.REVIEWS, process.env.REVIEW_OUTPUTS);
   const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
   // The status goes first so a failed comment cannot leave the head pending.
   await setStatus(github, context, pr.head.sha, result.state, result.description);

@@ -3,18 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, humanStatusContext, humanLabel, marker, publish, gate } = require('./ai-review.cjs');
-const {
-  sha,
-  output,
-  routine,
-  review,
-  decided,
-  claudeReviews,
-  clearAfter,
-  client,
-  context,
-  core,
-} = require('./test-helpers.cjs');
+const { sha, output, routine, review, decided, claudeReviews, client, context, core } = require('./test-helpers.cjs');
 
 test('gate re-sets the live head after a review event, by its head branch', async () => {
   const workflowRun = {
@@ -103,12 +92,11 @@ test('gate decides from the review the summary comment records for the live head
 });
 
 test('gate reads the comment that publish writes', async (t) => {
-  clearAfter(t, 'REVIEWS');
   for (const [human, want] of [
     [routine, 'No human review needed.'],
     [{ needed: true, reasons: ['Changes --> billing.'] }, 'Needs human review: Changes --> billing.'],
   ]) {
-    process.env.REVIEWS = claudeReviews('success', output([], 'Adds a cache.', human));
+    claudeReviews(t, 'success', output([], 'Adds a cache.', human));
     const published = client();
     await publish({ github: published.github, context: context(), core: core() });
     const [{ body }] = published.named('createComment');
@@ -203,8 +191,7 @@ test('withdrawing the approval restores the error, and only for this fallback', 
 });
 
 test('publish accepts an approval of the commit whose review then fails', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = claudeReviews('failure');
+  claudeReviews(t, 'failure');
   // The verdict publish just wrote reads back as an error.
   const c = client({
     statuses: [{ context: statusContext, state: 'error' }],

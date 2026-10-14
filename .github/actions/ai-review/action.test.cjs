@@ -27,6 +27,12 @@ test('the action runs only the exported steps and passes inputs through env', ()
   const allowed = JSON.parse(script.match(/\[('prepare'.*?)\]/u)[0].replaceAll("'", '"'));
   assert.deepEqual(allowed, ['prepare', 'start', 'publish', 'override', 'gate']);
   for (const step of allowed) assert.equal(typeof review[step], 'function', step);
+  const inputs = text.split('\ninputs:\n')[1].split('\noutputs:\n')[0];
+  const names = [...inputs.matchAll(/^ {2}([a-z-]+):\n/gmu)].map((match) => match[1]);
+  assert.ok(names.includes('review-outputs'));
+  for (const name of names) {
+    assert.match(text, new RegExp(`\\n {8}[A-Z_]+: \\$\\{\\{ inputs\\.${name} \\}\\}\\n`, 'u'), name);
+  }
 });
 
 test('prepare runs its shell script first, from the action, with inputs in env', () => {
