@@ -143,6 +143,9 @@ test('Codex runs pinned and read-only, with no credential in its commands', () =
   const install = stepText(codex, '- name: Install Codex');
   assert.match(install, /\n {10}CODEX_VERSION: \d+\.\d+\.\d+\n/u);
   assert.match(install, /\n {10}npm install -g "@openai\/codex@\$CODEX_VERSION"\n/u);
+  // No later step can regain root, as with codex-action's drop-sudo.
+  assert.match(install, /\n {10}sudo rm -f \/etc\/sudoers\.d\/runner\n {10}if sudo -n true 2>\/dev\/null; then\n/u);
+  assert.equal(codex.slice(codex.indexOf('sudo rm -f') + 'sudo rm -f'.length).match(/\bsudo (?!-n true)/gu), null);
   const run = stepText(codex, providers.codex.step);
   assert.match(run, /\n {10}MODEL: [\w.-]+\n/u);
   assert.match(run, / -c 'default_permissions=":read-only"' /u);

@@ -286,13 +286,19 @@ jobs:
           git config --local --unset-all http.https://github.com/.extraheader || true
       # codex-action authenticates only with an API key, so the job runs the
       # CLI itself. Its sandbox needs the unprivileged user namespaces that
-      # GitHub's Ubuntu image restricts.
+      # GitHub's Ubuntu image restricts. Then the runner gives up sudo, as
+      # codex-action's drop-sudo did, since Codex holds the token.
       - name: Install Codex
         env:
           CODEX_VERSION: 0.162.1
         run: |
           npm install -g "@openai/codex@$CODEX_VERSION"
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo rm -f /etc/sudoers.d/runner
+          if sudo -n true 2>/dev/null; then
+            echo "::error::The runner still has sudo."
+            exit 1
+          fi
       # Codex's commands see only a fresh /proc, and so none of this job's
       # processes, unless the sandbox cannot mount one: then it silently keeps
       # the host's, where the token sits in the environment of Codex itself.
@@ -300,12 +306,13 @@ jobs:
       - name: Check that Codex's commands cannot read its environment
         run: |
           canary=$(openssl rand -hex 16)
+          errors="$RUNNER_TEMP/codex-sandbox-errors.txt"
           seen=$(CANARY_TOKEN=$canary codex -c 'shell_environment_policy.ignore_default_excludes=false' \
-            sandbox -P ':read-only' -- sh -c 'echo sandboxed; cat /proc/[0-9]*/environ' 2>/dev/null | tr '\0' '\n' || true)
+            sandbox -P ':read-only' -- sh -c 'echo sandboxed; cat /proc/[0-9]*/environ' 2>"$errors" | tr '\0' '\n' || true)
           case "$seen" in
             *"$canary"*) echo "::error::Codex's sandboxed commands can read the environment Codex runs in." && exit 1 ;;
             *sandboxed*) ;;
-            *) echo "::error::Codex's sandbox did not run." && exit 1 ;;
+            *) tail -n 20 "$errors" && echo "::error::Codex's sandbox did not run." && exit 1 ;;
           esac
       - id: codex
         # A job timeout reports `cancelled` and would leave the head pending,
