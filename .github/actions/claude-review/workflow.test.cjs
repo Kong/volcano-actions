@@ -24,7 +24,7 @@ test('the workflow keeps the reviewer inside its trust boundary', () => {
   assert.deepEqual(Object.keys(jobs), ['start', 'review', 'verdict', 'override']);
 
   // Callers choose the trigger; every job that acts runs only under
-  // pull_request_target, which mints for the caller's protected base.
+  // pull_request_target, which runs the caller's base-branch stub.
   assert.match(workflow, /\non:\n {2}workflow_call:\n/u);
   assert.doesNotMatch(
     workflow,
