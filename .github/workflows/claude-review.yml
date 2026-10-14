@@ -14,12 +14,9 @@
 #   says which levels fail, so Claude ranks the problem rather than the gate.
 #   Likewise it defines when a person is needed by the change, never by what
 #   that decision lets the PR skip.
-# - pull_request_target: the federation mints only for protected refs, and
-#   this trigger runs as the caller's base branch. The OIDC token names the
-#   caller's repository and ref, so each caller must be listed in the
-#   team-volcano federation or pass the `anthropic_api_key` secret. Every job
-#   skips on any other trigger.
-#   https://github.com/Kong/ksai/blob/main/federations/README.md#what-the-rule-grants
+# - pull_request_target runs as the caller's base branch, which supplies the
+#   stub and the `anthropic_api_key` secret it passes. Every job skips on any
+#   other trigger.
 # - A PR cannot edit its judge: the caller reads its stub from the base branch,
 #   and this workflow and .github/actions/claude-review come from trusted
 #   revisions of this repository.
@@ -59,11 +56,11 @@ on:
       allowed_bots:
         description: Bots whose PRs are reviewed. The action refuses other bots, which errors the verdict.
         type: string
-        default: dependabot[bot],kong[bot]
+        default: dependabot[bot],kong[bot],kong-volcano-app[bot]
     secrets:
       anthropic_api_key:
-        description: An Anthropic API key, for a repository outside the team-volcano federation. When set, the review uses it instead of the federation.
-        required: false
+        description: The Anthropic API key the review calls Claude with.
+        required: true
 
 permissions: {}
 
@@ -111,7 +108,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
     outputs:
       findings: ${{ steps.claude.outputs.structured_output }}
       candidates: ${{ steps.candidates.outputs.candidates }}
@@ -210,20 +206,13 @@ jobs:
           # The action refuses bot-triggered runs by default; these bots open and
           # push the calling repository's own PRs.
           allowed_bots: ${{ inputs.allowed_bots }}
-          # A caller's API key replaces the federation. The identifiers are not
-          # secret; they route the run to team-volcano's Anthropic workspace,
-          # which is the billing boundary.
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
-          anthropic_federation_rule_id: ${{ !secrets.anthropic_api_key && 'fdrl_01M6B8uVvCFX7jTHzQvbB9Mg' || '' }}
-          anthropic_organization_id: ${{ !secrets.anthropic_api_key && '4ce7a6d3-9549-4842-bd51-1def5eba611b' || '' }}
-          anthropic_service_account_id: ${{ !secrets.anthropic_api_key && 'svac_01W5D3EfygrsxBr5vcD8AKnR' || '' }}
-          anthropic_workspace_id: ${{ !secrets.anthropic_api_key && 'wrkspc_01G7dX83HGYMZDwLuJNPnA5T' || '' }}
           # Reads stay in the base checkout and the --add-dir inputs; .git holds
           # the credential include, and runner token files live outside both.
           # --strict-mcp-config (below) loads only the action's own MCP servers:
           # the action enables every project .mcp.json server, and a caller's
           # can fetch and run unpinned code (for example `npx pkg@latest`) on
-          # a runner that holds id-token and pull-request-write credentials.
+          # a runner that holds the API key and a pull-request-write token.
           settings: |
             {"permissions":{"blockReadsOutsideWorkingDirectories":true,"disableBypassPermissionsMode":"disable","deny":["Read(/${{ github.workspace }}/.git/**)","WebFetch","WebSearch"]}}
           prompt: |

@@ -18,18 +18,6 @@ test('the documented label descriptions fit GitHub limits', () => {
 // called jobs use, and no concurrency group that could deadlock with its own.
 // Edits and labels run in a second workflow with other check names, so their
 // skipped runs cannot hide the review's checks on the PR page.
-// This repository's own stubs also pass its API key, which callers in the
-// federation do not copy.
-const key =
-  '    # This repository is not in the team-volcano federation.\n' +
-  '    secrets:\n' +
-  '      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}\n';
-const callerStub = (file) => {
-  const own = readRepo(`.github/workflows/${file}`);
-  assert.ok(own.endsWith(key), file);
-  return own.slice(0, -key.length);
-};
-
 test('the caller stubs grant what the review needs and set no concurrency', () => {
   const stubs = {
     'pr-claude-review.yml': {
@@ -47,7 +35,7 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
   // README.md shows them inside a list item, indented three spaces.
   const readme = readRepo('README.md').replaceAll(/^ {3}/gmu, '');
   for (const [file, want] of Object.entries(stubs)) {
-    const stub = callerStub(file);
+    const stub = readRepo(`.github/workflows/${file}`);
     const shown = stub.slice(stub.indexOf('\nname: ') + 1);
     assert.match(shown, new RegExp(`^name: ${want.name.replaceAll(/[()]/gu, '\\$&')}\n`, 'u'), file);
     assert.match(
@@ -67,7 +55,7 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
     );
     assert.match(
       stub,
-      /\n {4}permissions:\n {6}contents: read\n {6}id-token: write\n {6}pull-requests: write\n {6}statuses: write\n/u,
+      /\n {4}permissions:\n {6}contents: read\n {6}pull-requests: write\n {6}statuses: write\n {4}secrets:\n {6}anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_CI_API_KEY \}\}\n$/u,
       file,
     );
     assert.doesNotMatch(stub, /concurrency/u, file);

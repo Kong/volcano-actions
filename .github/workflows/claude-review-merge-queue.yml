@@ -3,8 +3,8 @@
 # both on its head to enter the queue, so the merge-group commit passes without
 # another review.
 # Callers run this from a merge_group workflow apart from their
-# claude-review.yml caller, because a workflow that runs in the merge queue may
-# not hold an OIDC token, and the review job needs one.
+# claude-review.yml caller, so merge-group runs hold only `statuses: write` and
+# never receive the API key.
 
 name: Claude Review (merge queue)
 

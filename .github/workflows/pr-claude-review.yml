@@ -15,9 +15,7 @@ jobs:
     uses: Kong/volcano-actions/.github/workflows/claude-review.yml@main
     permissions:
       contents: read
-      id-token: write
       pull-requests: write
       statuses: write
-    # This repository is not in the team-volcano federation.
     secrets:
-      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
