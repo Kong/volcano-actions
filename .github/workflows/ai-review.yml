@@ -20,8 +20,8 @@
 #   what happens if it is not fixed and never says which levels fail, so a
 #   reviewer ranks the problem rather than the gate. Likewise it defines when a
 #   person is needed by the change, never by what that decision lets the PR
-#   skip. Each reviewer job adds only how its provider reads, comments, and
-#   returns its verdict.
+#   skip. Each reviewer job adds only how its provider reads and returns its
+#   verdict; the verdict job posts every reviewer's comments.
 # - pull_request_target runs as the caller's base branch, which supplies the
 #   stub and the API key secrets it passes. Every job skips on any other
 #   trigger.
@@ -201,10 +201,9 @@ jobs:
             Post no comments; the workflow publishes your structured output.
 
             Your structured output is the verdict for this exact head SHA. List
-            every finding that applies to the current diff, including ones
-            raised in earlier comments that the code still has, and omit ones
-            the code has since fixed. Return an empty findings list if there
-            are none, and decide human_review for the change at this head.
+            every finding that applies to the current diff, and omit ones the
+            code has since fixed. Return an empty findings list if there are
+            none, and decide human_review for the change at this head.
           # The schema rides in single quotes; the action's tests keep quotes out of it.
           claude_args: |
             --model claude-opus-5-5

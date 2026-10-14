@@ -13,8 +13,8 @@ with callers' stubs and update `README.md` when the stub changes.
 The AI review runs one job per provider in `ai-review.yml` and combines them
 in one verdict. The policy and output schema ship with the action
 (`policy.md`, `schema.json`) and reach every reviewer through its `prepare`
-step; a provider's job adds only how that provider reads, comments, and
-returns its verdict. The verdict code reads any number of reviewers from the
+step; a provider's job adds only how that provider reads and returns its
+verdict, and the verdict job posts every reviewer's comments. The verdict code reads any number of reviewers from the
 `verdict` job's `needs`, so adding a provider changes only the workflow, its
 secrets, and the reviewer-job tests. `README.md` lists the steps. Name a
 provider in user-facing text only when the text is about that one reviewer;
