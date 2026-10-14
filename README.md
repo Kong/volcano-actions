@@ -1,7 +1,7 @@
 # volcano-actions
 
 Shared GitHub Actions and reusable workflows for Volcano repositories. The
-`pr-review` skill that the Claude review mentions lives in
+`guided-review` and `pr-review` skills that the Claude review mentions live in
 [`Kong/volcano-conventions`](https://github.com/Kong/volcano-conventions).
 
 ## Claude review
