@@ -34,16 +34,20 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
   and posts inline comments. Codex reads them in a read-only sandbox with no
   network, after the job drops the checkout's credentials.
 
-One verdict combines every reviewer:
+One verdict combines every reviewer, and the summary comment reads as a
+single review that names no reviewer or provider, however many ran:
 
-- A P0-P2 finding from any reviewer fails it. The summary comment lists every
-  finding, tagged with its reviewer when the workflow has several.
-- Any reviewer can ask for a person. Their reasons, and what they could not
-  check, merge without repeats.
+- A P0-P2 finding from any reviewer fails it. Any reviewer can ask for a
+  person.
+- When several reviewers complete, a model call merges their reviews into one
+  summary and one findings list without repeats. The status, whether a person
+  is needed, and the suggested reviewer still come from every reviewer's own
+  output, so the merge cannot drop a blocker. Without a working key, the
+  reviews merge without a model.
 - When a provider has an outage or its review otherwise does not complete, the
-  other reviewers' verdict stands, and the comment and the run say so. When
-  none completes, the verdict is an error and the head waits for a person, as
-  described below.
+  other reviewers' verdict stands, and the run log warns which one is missing.
+  When none completes, the verdict is an error and the head waits for a
+  person, as described below.
 
 To add a provider, change only the workflow; the verdict reads any number of
 reviewers:
@@ -52,7 +56,7 @@ reviewers:
    key, checks out the base, runs the action with `step: prepare`, and then
    runs the provider with prepare's `policy` and `schema` (or
    `schema-without-max-length`) and its own prompt lines. Its outputs are
-   `reviewer`, the name the comment shows; `findings`, its structured output;
+   `reviewer`, the name the run log uses; `findings`, its structured output;
    and `candidates`, from prepare.
 2. List the job in the `verdict` job's `needs`.
 3. Add its API key to the workflow's secrets, with `required: false`, and to

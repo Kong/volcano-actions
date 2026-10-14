@@ -301,7 +301,8 @@ jobs:
     # cancelled before any finished publishes nothing; its SHA stays pending.
     if: always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'failure'))
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Merging two reviews into one takes a model call.
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
@@ -313,6 +314,10 @@ jobs:
           step: publish
           reviews: ${{ toJSON(needs) }}
           human-review-paths: ${{ inputs.human_review_paths }}
+          # Merge the reviews into one. Without a working key, publish merges
+          # them without a model.
+          anthropic-api-key: ${{ secrets.anthropic_api_key }}
+          openai-api-key: ${{ secrets.openai_api_key }}
 
   override:
     if: >-

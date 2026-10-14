@@ -123,6 +123,8 @@ test('one verdict job publishes every reviewer once any of them finishes', () =>
     'step: publish',
     'reviews: ${{ toJSON(needs) }}',
     'human-review-paths: ${{ inputs.human_review_paths }}',
+    'anthropic-api-key: ${{ secrets.anthropic_api_key }}',
+    'openai-api-key: ${{ secrets.openai_api_key }}',
   ]) {
     assert.ok(job.includes(`\n          ${line}\n`), line);
   }
