@@ -41,7 +41,10 @@ test('the workflow keeps the reviewer inside its trust boundary', () => {
   assert.match(jobs.review, /needs: start\n {4}if: needs\.start\.outputs\.review == 'true'\n/u);
   assert.match(jobs.review, /CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'/u);
   assert.match(jobs.review, /allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/u);
-  assert.match(workflow, /\n {6}allowed_bots:\n(?: {8}.*\n)*? {8}default: dependabot\[bot\],kong\[bot\],kong-volcano-app\[bot\]\n/u);
+  assert.match(
+    workflow,
+    /\n {6}allowed_bots:\n(?: {8}.*\n)*? {8}default: dependabot\[bot\],kong\[bot\],kong-volcano-app\[bot\]\n/u,
+  );
   assert.doesNotMatch(workflow, /id-token/u);
 });
 
