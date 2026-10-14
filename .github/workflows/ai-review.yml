@@ -279,7 +279,7 @@ jobs:
           # No writes and no network. The default drop-sudo safety strategy
           # keeps the key in a proxy Codex cannot reach.
           permission-profile: ':read-only'
-          effort: high
+          effort: xhigh
           # The action refuses runs by users without write access; these bots
           # open and push the calling repository's own PRs.
           allow-bot-users: ${{ inputs.allowed_bots }}
