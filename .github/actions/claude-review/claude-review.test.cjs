@@ -946,6 +946,12 @@ test('the workflow keeps the reviewer inside its trust boundary', () => {
   assert.match(jobs.review, /allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/);
   assert.match(workflow, /\n {6}allowed_bots:\n(?: {8}.*\n)*? {8}default: dependabot\[bot\],kong\[bot\]\n/);
   assert.match(jobs.review, /id-token: write/);
+  // A caller's API key replaces the federation rather than joining it.
+  assert.match(jobs.review, /\n {10}anthropic_api_key: \$\{\{ secrets\.anthropic_api_key \}\}\n/);
+  const federation = jobs.review.match(/\n {10}anthropic_(?:federation_rule|organization|service_account|workspace)_id: .*/g);
+  assert.equal(federation.length, 4);
+  for (const line of federation) assert.match(line, /: \$\{\{ !secrets\.anthropic_api_key && '[\w-]+' \|\| '' \}\}$/);
+  assert.match(workflow, /\n {4}secrets:\n {6}anthropic_api_key:\n(?: {8}.*\n)*? {8}required: false\n/);
   for (const name of ['start', 'verdict', 'override']) assert.doesNotMatch(jobs[name], /id-token/, name);
 
   // Claude runs in a base checkout and reads the head from a separate worktree,
@@ -1319,8 +1325,16 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
   };
   // README.md shows them inside a list item, indented three spaces.
   const readme = readRepo('README.md').replace(/^ {3}/gm, '');
+  // This repository's own stubs also pass its API key, which callers in the
+  // federation do not copy.
+  const key =
+    '    # This repository is not in the team-volcano federation.\n' +
+    '    secrets:\n' +
+    '      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}\n';
   for (const [file, want] of Object.entries(stubs)) {
-    const stub = readRepo(`.github/workflows/${file}`);
+    const own = readRepo(`.github/workflows/${file}`);
+    assert.ok(own.endsWith(key), file);
+    const stub = own.slice(0, -key.length);
     const shown = stub.slice(stub.indexOf('\nname: ') + 1);
     assert.match(shown, new RegExp(`^name: ${want.name.replace(/[()]/g, '\\$&')}\n`), file);
     assert.match(stub, new RegExp(`\n {2}pull_request_target:\n {4}branches: \\[main\\]\n {4}types: \\[${want.types}\\]\n`), file);

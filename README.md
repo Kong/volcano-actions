@@ -229,6 +229,17 @@ retarget reviews the PR again:
 repository root: `*` stays within a directory, `**/` spans any number of them,
 and lines starting with `#` are comments.
 
+A repository outside the team-volcano federation, such as this one, can skip
+step 1 and pass an Anthropic API key from a repository secret in both
+workflows instead:
+
+```yaml
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+The review then authenticates with the key instead of the federation.
+
 Callers using `@main` receive workflow changes when they merge here. Callers
 pinned to a workflow SHA need a reference update. The workflow pins its nested
 composite action to a full commit SHA, so action changes do not roll out until
