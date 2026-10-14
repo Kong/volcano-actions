@@ -59,8 +59,8 @@ on:
         default: dependabot[bot],kong[bot],kong-volcano-app[bot]
     secrets:
       anthropic_api_key:
-        description: The Anthropic API key the review calls Claude with.
-        required: true
+        description: The Anthropic API key the review calls Claude with. Every caller passes it; the review job fails without it.
+        required: false
 
 permissions: {}
 
@@ -112,6 +112,17 @@ jobs:
       findings: ${{ steps.claude.outputs.structured_output }}
       candidates: ${{ steps.candidates.outputs.candidates }}
     steps:
+      # A required secret that is unset fails the run before start, which
+      # leaves the head with no verdict that an approval or override could
+      # clear. Failing here makes the verdict an error instead.
+      - name: Require the API key
+        env:
+          KEY_SET: ${{ secrets.anthropic_api_key != '' }}
+        run: |
+          if [ "$KEY_SET" != true ]; then
+            echo "::error::The caller must pass the anthropic_api_key secret, for example from ANTHROPIC_CI_API_KEY."
+            exit 1
+          fi
       # The base branch sits at the workspace root, so everything Claude and
       # the action load from there (CLAUDE.md, .claude/, and the files their
       # hooks and symlinks reach) is trusted. The PR head is only data, in a
