@@ -274,6 +274,8 @@ jobs:
         with:
           openai-api-key: ${{ secrets.openai_api_key }}
           codex-version: 0.162.1
+          # Named, so a model change shows in review rather than with a CLI bump.
+          model: gpt-6.1-sol
           # No writes and no network. The default drop-sudo safety strategy
           # keeps the key in a proxy Codex cannot reach.
           permission-profile: ':read-only'

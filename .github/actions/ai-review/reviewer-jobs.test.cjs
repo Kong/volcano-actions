@@ -106,6 +106,7 @@ test('Codex runs pinned and read-only', () => {
   const run = stepText(jobsOf(reviewWorkflow()).codex, providers.codex.step);
   assert.match(run, /\n {8}uses: openai\/codex-action@[a-f0-9]{40} # v[\d.]+\n/u);
   assert.match(run, /\n {10}codex-version: \d+\.\d+\.\d+\n/u);
+  assert.match(run, /\n {10}model: [\w.-]+\n/u);
   assert.match(run, /\n {10}permission-profile: ':read-only'\n/u);
   // The default drop-sudo strategy; `unsafe` or a legacy sandbox would widen access.
   assert.doesNotMatch(run, /safety-strategy|sandbox:|codex-args|--full-auto|danger/u);
