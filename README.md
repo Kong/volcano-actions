@@ -53,7 +53,8 @@ To add a provider, change only the workflow; the verdict reads any number of
 reviewers:
 
 1. Add a job to `ai-review.yml` like `claude` and `codex`. It requires its
-   credential, checks out the base, runs the action with `step: prepare`, and then
+   credential, refuses bots outside `allowed_bots` (start leaves bots to the
+   reviewers), checks out the base, runs the action with `step: prepare`, and then
    runs the provider with prepare's `policy` and `schema` (or
    `schema-without-max-length`) and its own prompt lines. Its outputs are
    `reviewer`, the name the run log uses; `model`, the model its inline

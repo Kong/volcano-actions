@@ -244,18 +244,22 @@ jobs:
             echo "::error::The caller must pass the codex_access_token secret, for example from CODEX_CI_ACCESS_TOKEN."
             exit 1
           fi
-      # start() leaves bots to the reviewers; the claude job's action refuses
-      # those outside allowed_bots, as codex-action did.
+      # start() leaves bots to the reviewers. This matches allowed_bots as the
+      # claude job's action does: `*` allows every bot, names ignore case, and
+      # the [bot] suffix is optional.
       - name: Require an allowed bot
         if: endsWith(github.actor, '[bot]')
         env:
           ACTOR: ${{ github.actor }}
           ALLOWED: ${{ inputs.allowed_bots }}
         run: |
-          IFS=, read -ra bots <<< "$ALLOWED"
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+          actor=$(lower "$ACTOR")
+          IFS=, read -ra bots <<< "$(lower "$ALLOWED")"
           for bot in "${bots[@]}"; do
             bot=${bot// /}
-            [ "${bot%"[bot]"}[bot]" = "$ACTOR" ] && exit 0
+            [ "$bot" = '*' ] && exit 0
+            [ "${bot%"[bot]"}[bot]" = "$actor" ] && exit 0
           done
           echo "::error::$ACTOR is not in allowed_bots."
           exit 1

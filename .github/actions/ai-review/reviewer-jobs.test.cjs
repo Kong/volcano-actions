@@ -5,11 +5,21 @@ const test = require('node:test');
 const { spawnSync } = require('node:child_process');
 const { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
 
-// Each reviewer job's provider step, the credential secret it calls with, and
-// how that step names its model.
+// Each reviewer job's provider step, the credential secret it calls with, how
+// that step names its model, and how the job refuses bots outside allowed_bots.
 const providers = {
-  claude: { step: '- id: claude', secret: 'anthropic_api_key', model: /\n {12}--model (\S+)\n/u },
-  codex: { step: '- id: codex', secret: 'codex_access_token', model: /\n {10}MODEL: (\S+)\n/u },
+  claude: {
+    step: '- id: claude',
+    secret: 'anthropic_api_key',
+    model: /\n {12}--model (\S+)\n/u,
+    bots: /\n {10}allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/u,
+  },
+  codex: {
+    step: '- id: codex',
+    secret: 'codex_access_token',
+    model: /\n {10}MODEL: (\S+)\n/u,
+    bots: /\n {10}ALLOWED: \$\{\{ inputs\.allowed_bots \}\}\n/u,
+  },
 };
 const prepare = `- id: prepare\n        uses: ${action}\n        with:\n          step: prepare\n          focus: \${{ inputs.focus }}\n`;
 
@@ -151,6 +161,12 @@ test('Codex runs pinned and read-only, with no credential in its commands', () =
   assert.match(canary, /\*"\$canary"\*\) echo "::error::.*" && exit 1 ;;\n/u);
 });
 
+test('every reviewer job refuses bots outside allowed_bots', () => {
+  const jobs = jobsOf(reviewWorkflow());
+  // start() leaves bots to the reviewers, so a job without this would review any bot.
+  for (const name of reviewerJobs(jobs)) assert.match(jobs[name], providers[name].bots, name);
+});
+
 test('the codex job refuses bots outside allowed_bots, as the claude job does', () => {
   const { codex } = jobsOf(reviewWorkflow());
   const steps = stepsOf(codex);
@@ -159,12 +175,16 @@ test('the codex job refuses bots outside allowed_bots, as the claude job does', 
   assert.match(step, /\n {8}if: endsWith\(github\.actor, '\[bot\]'\)\n/u);
   assert.match(step, /\n {10}ACTOR: \$\{\{ github\.actor \}\}\n {10}ALLOWED: \$\{\{ inputs\.allowed_bots \}\}\n/u);
   const script = step.slice(step.indexOf('run: |\n') + 'run: |\n'.length).replaceAll(/^ {10}/gmu, '');
-  const allowed = 'dependabot[bot], kong-volcano-app';
-  const runs = (actor) => spawnSync('bash', ['-c', script], { env: { ACTOR: actor, ALLOWED: allowed } }).status;
-  assert.equal(runs('dependabot[bot]'), 0);
-  assert.equal(runs('kong-volcano-app[bot]'), 0);
-  assert.equal(runs('renovate[bot]'), 1);
-  assert.equal(runs('dependabot'), 1);
+  const runs = (actor, allowed) =>
+    spawnSync('bash', ['-c', script], { env: { PATH: process.env.PATH, ACTOR: actor, ALLOWED: allowed } }).status;
+  const listed = 'dependabot[bot], Kong-Volcano-App';
+  assert.equal(runs('dependabot[bot]', listed), 0);
+  assert.equal(runs('kong-volcano-app[bot]', listed), 0);
+  assert.equal(runs('Dependabot[bot]', listed), 0);
+  assert.equal(runs('renovate[bot]', listed), 1);
+  assert.equal(runs('dependabot', listed), 1);
+  assert.equal(runs('renovate[bot]', ' * '), 0);
+  assert.equal(runs('renovate[bot]', ''), 1);
 });
 
 test('one verdict job publishes every reviewer once any of them finishes', () => {
