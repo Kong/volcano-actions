@@ -42,20 +42,15 @@ test('the workflow keeps the reviewer inside its trust boundary', () => {
   assert.match(jobs.review, /CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'/u);
   assert.match(jobs.review, /allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/u);
   assert.match(workflow, /\n {6}allowed_bots:\n(?: {8}.*\n)*? {8}default: dependabot\[bot\],kong\[bot\]\n/u);
-  assert.match(jobs.review, /id-token: write/u);
-  for (const name of ['start', 'verdict', 'override']) assert.doesNotMatch(jobs[name], /id-token/u, name);
+  assert.doesNotMatch(workflow, /id-token/u);
 });
 
-test("a caller's API key replaces the federation rather than joining it", () => {
+test("the review calls Claude with the caller's API key", () => {
   const workflow = reviewWorkflow();
   const { review } = jobsOf(workflow);
   assert.match(review, /\n {10}anthropic_api_key: \$\{\{ secrets\.anthropic_api_key \}\}\n/u);
-  const federation = review.match(
-    /\n {10}anthropic_(?:federation_rule|organization|service_account|workspace)_id: .*/gu,
-  );
-  assert.equal(federation.length, 4);
-  for (const line of federation) assert.match(line, /: \$\{\{ !secrets\.anthropic_api_key && '[\w-]+' \|\| '' \}\}$/u);
-  assert.match(workflow, /\n {4}secrets:\n {6}anthropic_api_key:\n(?: {8}.*\n)*? {8}required: false\n/u);
+  assert.doesNotMatch(workflow, /anthropic_(?:federation_rule|organization|service_account|workspace)_id/u);
+  assert.match(workflow, /\n {4}secrets:\n {6}anthropic_api_key:\n(?: {8}.*\n)*? {8}required: true\n/u);
 });
 
 test('only events for one head share a review run group', () => {

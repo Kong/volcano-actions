@@ -61,9 +61,9 @@ so a repository that opts in can drop a catch-all CODEOWNERS line.
 
 To add it to a repository:
 
-1. Add the repository to `team-volcano` in
-   [`Kong/ksai` federations](https://github.com/Kong/ksai/blob/main/federations/team-volcano.yaml).
-   The federation mints only for listed repositories and protected branches.
+1. Make the `ANTHROPIC_CI_API_KEY` secret available to the repository's
+   Actions, as an organization or repository secret. The stubs below pass it
+   to the review, which calls Claude with it.
 2. Protect `main` and require the `claude-review/verdict` status on it, with
    GitHub Actions as the expected source. Otherwise anyone with write access
    can satisfy it by posting a status with their own token.
@@ -88,9 +88,10 @@ To add it to a repository:
        uses: Kong/volcano-actions/.github/workflows/claude-review.yml@main
        permissions:
          contents: read
-         id-token: write
          pull-requests: write
          statuses: write
+       secrets:
+         anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
    ```
 
    And `.github/workflows/claude-review-retarget-override.yml`:
@@ -111,9 +112,10 @@ To add it to a repository:
        uses: Kong/volcano-actions/.github/workflows/claude-review.yml@main
        permissions:
          contents: read
-         id-token: write
          pull-requests: write
          statuses: write
+       secrets:
+         anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
    ```
 
    Every title, body, or label edit fires `edited` or `labeled`. The PR page
@@ -231,20 +233,6 @@ jobs:
 `human_review_paths` takes one glob per line, matched against paths from the
 repository root: `*` stays within a directory, `**/` spans any number of them,
 and lines starting with `#` are comments.
-
-A repository outside the team-volcano federation, such as this one, can skip
-step 1 and pass an Anthropic API key from a repository secret in both
-workflows instead:
-
-```yaml
-jobs:
-  claude-review:
-    # uses and permissions as above
-    secrets:
-      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-```
-
-The review then authenticates with the key instead of the federation.
 
 Callers using `@main` receive workflow changes when they merge here. Callers
 pinned to a workflow SHA need a reference update. The workflow pins its nested
