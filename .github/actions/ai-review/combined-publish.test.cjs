@@ -36,9 +36,7 @@ test('publish warns, but does not fail, when one review did not complete', async
   ]) {
     const { c, k } = await publishBoth({ claude, codex });
     assert.deepEqual(k.failures, [], missed);
-    assert.deepEqual(k.warnings, [
-      `The ${missed} review of abcdef1 did not complete, so the verdict is ${by}'s alone.`,
-    ]);
+    assert.deepEqual(k.warnings, [`The ${missed} review of abcdef1 did not complete, so the verdict rests on ${by}.`]);
     assert.deepEqual(
       c.set(statusContext).map(([, state]) => state),
       ['success'],
@@ -52,7 +50,10 @@ test('publish fails the job only when neither review completed', async (t) => {
   clearAfter(t, 'REVIEWS');
   const { c, k, body } = await publishBoth({ claude: ['failure', ''], codex: ['failure', ''] });
   assert.deepEqual(k.failures, [`No AI review produced a verdict for ${sha}.`]);
-  assert.deepEqual(k.warnings, []);
+  assert.deepEqual(k.warnings, [
+    'The Claude review of abcdef1 did not complete.',
+    'The Codex review of abcdef1 did not complete.',
+  ]);
   assert.deepEqual(
     c.set(statusContext).map(([, state]) => state),
     ['error'],
@@ -69,7 +70,7 @@ test('publish fails the job only when neither review completed', async (t) => {
   );
 });
 
-test("a person is asked for either review's reasons, and the comment names who cleared the code", async (t) => {
+test("a person is asked for either review's reasons, and the comment says the AI review cleared the code", async (t) => {
   clearAfter(t, 'REVIEWS');
   const asked = await publishBoth({
     claude: ['success', reviewJson({ human: routine })],
@@ -78,15 +79,12 @@ test("a person is asked for either review's reasons, and the comment names who c
   assert.deepEqual(asked.c.set(humanStatusContext), [
     [sha, 'pending', 'Needs human review: Should the task role write every queue?'],
   ]);
-  assert.ok(
-    asked.body.includes('\n\nClaude and Codex found no P0-P2 problems at abcdef1, so the code needs no second review'),
-  );
+  const cleared = '\n\nThe AI review found no P0-P2 problems at abcdef1, so the code needs no second review';
+  assert.ok(asked.body.includes(cleared));
   assert.equal(marked(asked.body).cleared, true);
 
   const codexOnly = await publishBoth({ claude: ['failure', ''], codex: ['success', reviewJson({ human: question })] });
-  assert.ok(
-    codexOnly.body.includes('\n\nCodex found no P0-P2 problems at abcdef1, so the code needs no second review'),
-  );
+  assert.ok(codexOnly.body.includes(cleared));
   const flagged = await publishBoth({ codex: ['success', reviewJson({ human: question, findings: [finding('p1')] })] });
   assert.doesNotMatch(flagged.body, /no second review/u);
   assert.equal(marked(flagged.body).cleared, false);

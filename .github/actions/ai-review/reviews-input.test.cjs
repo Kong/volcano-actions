@@ -10,8 +10,8 @@ const job = (result, outputs) => ({ result, outputs });
 
 test('every job in needs is a reviewer, named by its output or its job ID, in the order needs lists them', () => {
   const needs = {
-    codex: job('failure', { reviewer: 'Codex', findings: '', candidates: '' }),
-    claude: job('success', { reviewer: ' Claude ', findings: 'x', candidates: '["bob"]' }),
+    codex: job('failure', { reviewer: 'Codex', model: '', findings: '', candidates: '' }),
+    claude: job('success', { reviewer: ' Claude ', model: ' claude-opus-5-5 ', findings: 'x', candidates: '["bob"]' }),
     // A skipped or early-cancelled job sets no outputs, but still counts.
     gemini: job('skipped', {}),
     mistral: { result: 'cancelled' },
@@ -19,11 +19,11 @@ test('every job in needs is a reviewer, named by its output or its job ID, in th
   };
   assert.deepEqual(reviewersOf(JSON.stringify(needs)), {
     reviewers: [
-      { name: 'Codex', result: 'failure', output: '' },
-      { name: 'Claude', result: 'success', output: 'x' },
-      { name: 'Gemini', result: 'skipped', output: '' },
-      { name: 'Mistral', result: 'cancelled', output: '' },
-      { name: 'Other', result: 'success', output: '' },
+      { name: 'Codex', model: '', result: 'failure', output: '' },
+      { name: 'Claude', model: 'claude-opus-5-5', result: 'success', output: 'x' },
+      { name: 'Gemini', model: '', result: 'skipped', output: '' },
+      { name: 'Mistral', model: '', result: 'cancelled', output: '' },
+      { name: 'Other', model: '', result: 'success', output: '' },
     ],
     candidates: '["bob"]',
   });
@@ -42,7 +42,7 @@ test("reviewer candidates come from the first reviewer that found any, as each j
   assert.equal(candidates('', ''), '');
 });
 
-test('publish names reviewers by their output and keeps their order', async (t) => {
+test('publish keeps the reviewers in order, without naming them', async (t) => {
   clearAfter(t, 'REVIEWS');
   process.env.REVIEWS = JSON.stringify({
     second: job('success', { reviewer: 'Gemini', findings: reviewJson({ summary: 'G.' }) }),
@@ -51,9 +51,10 @@ test('publish names reviewers by their output and keeps their order', async (t) 
   const c = client();
   await publish({ github: c.github, context: context(), core: core() });
   const [{ body }] = c.named('createComment');
-  assert.match(body, /\n\n\*\*Gemini:\*\* G\.\n\n\*\*Claude:\*\* Adds a cache\.\n/u);
-  assert.match(body, / Nil map write \(Claude\)\n/u);
-  assert.match(body, /\*\*Not checked:\*\* Gemini and Claude read the diff/u);
+  // The first reviewer's summary stands for the review.
+  assert.match(body, /\n\nG\.\n\n\*\*⚪ P3\*\*\n- `internal\/a\.go:12` Nil map write\n/u);
+  assert.match(body, /\*\*Not checked:\*\* The AI review read the diff/u);
+  assert.doesNotMatch(body, /Gemini|Claude/u);
 });
 
 test('publish warns once for each review that did not complete', async (t) => {
@@ -68,11 +69,11 @@ test('publish warns once for each review that did not complete', async (t) => {
   await publish({ github: c.github, context: context(), core: k });
   assert.deepEqual(k.failures, []);
   assert.deepEqual(k.warnings, [
-    "The Claude review of abcdef1 did not complete, so the verdict is Codex's alone.",
-    "The Gemini review of abcdef1 did not complete, so the verdict is Codex's alone.",
+    'The Claude review of abcdef1 did not complete, so the verdict rests on Codex.',
+    'The Gemini review of abcdef1 did not complete, so the verdict rests on Codex.',
   ]);
   assert.deepEqual(c.set(statusContext), [
-    [sha, 'success', 'No P0-P2 findings (0 P3, 0 pre-existing; Codex only; Claude and Gemini did not complete).'],
+    [sha, 'success', 'No P0-P2 findings (0 P3, 0 pre-existing; 2 of 3 reviews did not complete).'],
   ]);
   assert.deepEqual(c.set(humanStatusContext), [[sha, 'success', 'No human review needed.']]);
 });

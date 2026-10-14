@@ -16,9 +16,9 @@ function cap(text, max) {
 // needs only reviewer jobs, so every entry is a reviewer, in the order the
 // object lists them. Each is named by its `reviewer` output, or by its job ID
 // when it set no outputs, as when it was skipped, so a reviewer that did not
-// run is still reported as incomplete. Reviewer candidates come from the
-// first one that reports them; every reviewer job finds them from the same
-// base history.
+// run is still reported as incomplete. Its `model` output names the model
+// that reviewed, if any. Reviewer candidates come from the first one that
+// reports them; every reviewer job finds them from the same base history.
 function reviewersOf(raw) {
   let needs;
   try {
@@ -28,13 +28,11 @@ function reviewersOf(raw) {
   }
   const entries = needs && typeof needs === 'object' && !Array.isArray(needs) ? Object.entries(needs) : [];
   const jobs = entries.filter(([, job]) => job && typeof job === 'object');
-  const nameOf = (id, job) => {
-    const named = typeof job.outputs?.reviewer === 'string' ? job.outputs.reviewer.trim() : '';
-    return named || `${id.charAt(0).toUpperCase()}${id.slice(1)}`;
-  };
+  const text = (value) => (typeof value === 'string' ? value.trim() : '');
   return {
     reviewers: jobs.map(([id, job]) => ({
-      name: nameOf(id, job),
+      name: text(job.outputs?.reviewer) || `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
+      model: text(job.outputs?.model),
       result: job.result,
       output: job.outputs?.findings ?? '',
     })),
@@ -50,15 +48,15 @@ const ownReasons = (review) =>
 
 // Anything but an explicit `needed: false` asks for a person, so a missing or
 // malformed decision fails closed without discarding the findings.
-function humanReasons({ name, review }) {
+function humanReasons(review) {
   const decision = review?.human_review;
   if (decision?.needed === false) return [];
   const reasons = ownReasons(review);
   if (reasons.length > 0) return reasons;
   return [
     decision?.needed === true
-      ? `${name} asked for a human review.`
-      : `${name} did not say whether this needs a human review.`,
+      ? 'The AI review asked for a human review.'
+      : 'The AI review did not say whether this needs a human review.',
   ];
 }
 
@@ -74,20 +72,20 @@ const clearsCode = (reviews, blocking) =>
 
 // A reviewer's pick when it is one of the candidates the workflow found, so
 // the PR cannot steer the request.
-function pickOf({ name, review }, candidates) {
+function pickOf(review, candidates) {
   const decision = review?.human_review;
   const pick = typeof decision?.reviewer === 'string' ? decision.reviewer.trim().replace(/^@/u, '').toLowerCase() : '';
   const login = candidates.find((c) => c.toLowerCase() === pick);
   if (!login) return null;
   const why = typeof decision.reviewer_reason === 'string' ? decision.reviewer_reason.trim().slice(0, 200) : '';
-  return { login, why: why || `${name} suggested them` };
+  return { login, why: why || 'the AI review suggested them' };
 }
 
-// The first reviewer's pick among the candidates, in reviewer order;
-// otherwise the candidate with the most history in the changed files.
-function suggestedReviewer(done, candidates) {
-  for (const entry of done) {
-    const pick = pickOf(entry, candidates);
+// The first review's pick among the candidates, in reviewer order; otherwise
+// the candidate with the most history in the changed files.
+function suggestedReviewer(reviews, candidates) {
+  for (const review of reviews) {
+    const pick = pickOf(review, candidates);
     if (pick) return pick;
   }
   return candidates.length > 0 ? { login: candidates[0], why: 'most recent history in the changed files' } : null;
@@ -115,6 +113,11 @@ const completed = (result, review) =>
   Array.isArray(review?.findings) &&
   review.findings.every((f) => Object.hasOwn(severities, severityOf(f)));
 
+// Each reviewer as [{ name, model, result, review }], with its structured
+// output parsed.
+const parsed = (reviewers) =>
+  reviewers.map(({ name, model, result, output }) => ({ name, model, result, review: parseReview(output) }));
+
 module.exports = {
   cap,
   reviewersOf,
@@ -122,6 +125,6 @@ module.exports = {
   clearsCode,
   suggestedReviewer,
   severityOf,
-  parseReview,
+  parsed,
   completed,
 };
