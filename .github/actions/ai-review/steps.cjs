@@ -1,6 +1,6 @@
 'use strict';
 
-const { humanStatusContext, overriddenBy, runUrl } = require('./constants.cjs');
+const { humanStatusContext, overriddenBy, runUrl, severities, clean } = require('./constants.cjs');
 const { verdict } = require('./verdict.cjs');
 const { pathReasons } = require('./paths.cjs');
 const { decisionMarker, humanSection, storedDecision } = require('./decision.cjs');
@@ -17,7 +17,7 @@ const {
 } = require('./github.cjs');
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
-const { reviewersOf } = require('./reviews.cjs');
+const { reviewersOf, parsed, completed, cap, severityOf } = require('./reviews.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
 // the same head. Without one, it still publishes, so a reopen finds a verdict.
@@ -100,8 +100,63 @@ function reportIncomplete(core, sha, result) {
   if (result.state === 'error') core.setFailed(`No AI review produced a verdict for ${sha}.`);
 }
 
+// Each completed review's findings on a line, as inline comments signed by
+// the model that found them.
+const inlineComments = (reviewers) =>
+  parsed(reviewers)
+    .filter((entry) => completed(entry.result, entry.review))
+    .flatMap(({ name, model, review }) =>
+      review.findings
+        .filter((f) => Number.isInteger(f.line) && f.line > 0)
+        .map((f) => ({
+          path: String(f.path),
+          line: f.line,
+          body: `**${severities[severityOf(f)]}:** ${clean(cap(String(f.title), 200))}\n\n<sub>Found by ${clean(cap(model || name, 100))}</sub>`,
+        })),
+    );
+
+// Posts the inline comments on the reviewed head. Reviewers may comment on the
+// same problem; only a comment whose exact body already sits at its line is
+// skipped, so reruns and later pushes do not repeat it. Comments sit beside
+// the verdict, so no failure here fails the job.
+async function postFindings({ github, context, core }, reviewers) {
+  const pr = context.payload.pull_request;
+  const comments = inlineComments(reviewers);
+  if (comments.length === 0) return;
+  const at = (c) => JSON.stringify([c.path, c.line, c.body]);
+  let posted;
+  try {
+    const existing = await github.paginate(github.rest.pulls.listReviewComments, {
+      ...context.repo,
+      pull_number: pr.number,
+      per_page: 100,
+    });
+    posted = new Set(existing.map((c) => at(c)));
+  } catch (error) {
+    core.warning(`Could not list the PR's review comments, so none were posted: ${error.message}`);
+    return;
+  }
+  for (const comment of comments) {
+    if (posted.has(at(comment))) continue;
+    posted.add(at(comment));
+    try {
+      await github.rest.pulls.createReviewComment({
+        ...context.repo,
+        pull_number: pr.number,
+        commit_id: pr.head.sha,
+        side: 'RIGHT',
+        ...comment,
+      });
+    } catch (error) {
+      const where = `${comment.path}:${comment.line}`;
+      if (error.status === 422) core.notice(`Skipped the comment on ${where}, which is outside the diff.`);
+      else core.warning(`Could not comment on ${where}: ${error.message}`);
+    }
+  }
+}
+
 // Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
-// head, then the summary comment.
+// head, then the summary comment, then each review's inline comments.
 async function publish({ github, context, core }) {
   const pr = context.payload.pull_request;
   const pull = await livePull(github, context);
@@ -132,6 +187,7 @@ async function publish({ github, context, core }) {
   // the reviews decide, so neither is theirs to clear; unread labels fail closed.
   decision.cleared = Boolean(result.cleared) && paths.length === 0 && live?.length === 0;
   await publishSummary({ github, context, core }, result, decision);
+  await postFindings({ github, context, core }, reviewers);
 }
 
 // Accepts the current head over a failing verdict, or a fork PR that is never

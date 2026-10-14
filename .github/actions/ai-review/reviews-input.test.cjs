@@ -10,8 +10,8 @@ const job = (result, outputs) => ({ result, outputs });
 
 test('every job in needs is a reviewer, named by its output or its job ID, in the order needs lists them', () => {
   const needs = {
-    codex: job('failure', { reviewer: 'Codex', findings: '', candidates: '' }),
-    claude: job('success', { reviewer: ' Claude ', findings: 'x', candidates: '["bob"]' }),
+    codex: job('failure', { reviewer: 'Codex', model: '', findings: '', candidates: '' }),
+    claude: job('success', { reviewer: ' Claude ', model: ' claude-opus-5-5 ', findings: 'x', candidates: '["bob"]' }),
     // A skipped or early-cancelled job sets no outputs, but still counts.
     gemini: job('skipped', {}),
     mistral: { result: 'cancelled' },
@@ -19,11 +19,11 @@ test('every job in needs is a reviewer, named by its output or its job ID, in th
   };
   assert.deepEqual(reviewersOf(JSON.stringify(needs)), {
     reviewers: [
-      { name: 'Codex', result: 'failure', output: '' },
-      { name: 'Claude', result: 'success', output: 'x' },
-      { name: 'Gemini', result: 'skipped', output: '' },
-      { name: 'Mistral', result: 'cancelled', output: '' },
-      { name: 'Other', result: 'success', output: '' },
+      { name: 'Codex', model: '', result: 'failure', output: '' },
+      { name: 'Claude', model: 'claude-opus-5-5', result: 'success', output: 'x' },
+      { name: 'Gemini', model: '', result: 'skipped', output: '' },
+      { name: 'Mistral', model: '', result: 'cancelled', output: '' },
+      { name: 'Other', model: '', result: 'success', output: '' },
     ],
     candidates: '["bob"]',
   });

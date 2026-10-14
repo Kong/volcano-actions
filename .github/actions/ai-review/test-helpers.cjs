@@ -31,13 +31,13 @@ const reviewJson = ({
 } = {}) =>
   JSON.stringify({ summary, findings, human_review: human, not_checked: notChecked, reviewed_closely: closely });
 // The verdict job's `toJSON(needs)` for reviewers given as
-// [name, result, findings, candidates], each in a job of its own.
+// [name, result, findings, candidates, model], each in a job of its own.
 const needsOf = (...reviewers) =>
   JSON.stringify(
     Object.fromEntries(
-      reviewers.map(([name, result, findings = '', candidates = ''], i) => [
+      reviewers.map(([name, result, findings = '', candidates = '', model = ''], i) => [
         `job${i}`,
-        { result, outputs: { reviewer: name, findings, candidates } },
+        { result, outputs: { reviewer: name, model, findings, candidates } },
       ]),
     ),
   );
@@ -89,6 +89,10 @@ const clientDefaults = () => ({
   failRequest: false,
   failReviews: false,
   failStatuses: false,
+  reviewComments: [],
+  failReviewComments: false,
+  // [message, status] to reject a review comment with, or null to accept it.
+  rejectComment: () => null,
   commitAuthor: () => null,
 });
 
@@ -125,6 +129,12 @@ const pullsApi = (o, record) => ({
   list: record('listPulls', () => ({ data: o.open })),
   listReviews: () => {},
   listFiles: () => {},
+  listReviewComments: () => {},
+  createReviewComment: record('createReviewComment', (args) => {
+    const rejection = o.rejectComment(args);
+    if (rejection) throw httpError(...rejection);
+    return { data: {} };
+  }),
   requestReviewers: record('requestReviewers', () => {
     if (o.failRequest) throw httpError('Validation Failed', 422);
     return { data: {} };
@@ -148,7 +158,7 @@ const reposApi = (o, record) => ({
   }),
 });
 
-// Lists reviews, files, or, for any other method, comments.
+// Lists reviews, files, review comments, or, for any other method, comments.
 function paginator(o, rest, calls) {
   const list = (call, items, failure) => (args) => {
     calls.push({ ...args, call });
@@ -158,6 +168,10 @@ function paginator(o, rest, calls) {
   const lists = new Map([
     [rest.pulls.listReviews, list('listReviews', o.reviews, o.failReviews && ['Server Error', 500])],
     [rest.pulls.listFiles, list('listFiles', o.files, o.failFiles && ['Server Error', 500])],
+    [
+      rest.pulls.listReviewComments,
+      list('listReviewComments', o.reviewComments, o.failReviewComments && ['Server Error', 500]),
+    ],
   ]);
   const comments = list('listComments', o.comments, o.failComments && ['Validation Failed', 422]);
   return endpoint((method, args) => (lists.get(method) ?? comments)(args));

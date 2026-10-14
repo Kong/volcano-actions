@@ -26,8 +26,9 @@ const needs = (reviewers, skipped = false) =>
     ...(skipped && { mistral: { result: 'skipped' } }),
   });
 
-// Everything a run published: status descriptions, comment bodies, the
-// decision each comment records, and review requests.
+// Everything a run published as the AI review: status descriptions, comment
+// bodies, the decision each comment records, and review requests. Inline
+// comments are each reviewer's own, signed by its model, so they are not here.
 function published(c) {
   const bodies = [...c.named('createComment'), ...c.named('updateComment')].map((x) => x.body);
   const decisions = bodies.map((body) =>

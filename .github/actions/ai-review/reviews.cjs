@@ -16,9 +16,9 @@ function cap(text, max) {
 // needs only reviewer jobs, so every entry is a reviewer, in the order the
 // object lists them. Each is named by its `reviewer` output, or by its job ID
 // when it set no outputs, as when it was skipped, so a reviewer that did not
-// run is still reported as incomplete. Reviewer candidates come from the
-// first one that reports them; every reviewer job finds them from the same
-// base history.
+// run is still reported as incomplete. Its `model` output names the model
+// that reviewed, if any. Reviewer candidates come from the first one that
+// reports them; every reviewer job finds them from the same base history.
 function reviewersOf(raw) {
   let needs;
   try {
@@ -28,13 +28,11 @@ function reviewersOf(raw) {
   }
   const entries = needs && typeof needs === 'object' && !Array.isArray(needs) ? Object.entries(needs) : [];
   const jobs = entries.filter(([, job]) => job && typeof job === 'object');
-  const nameOf = (id, job) => {
-    const named = typeof job.outputs?.reviewer === 'string' ? job.outputs.reviewer.trim() : '';
-    return named || `${id.charAt(0).toUpperCase()}${id.slice(1)}`;
-  };
+  const text = (value) => (typeof value === 'string' ? value.trim() : '');
   return {
     reviewers: jobs.map(([id, job]) => ({
-      name: nameOf(id, job),
+      name: text(job.outputs?.reviewer) || `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
+      model: text(job.outputs?.model),
       result: job.result,
       output: job.outputs?.findings ?? '',
     })),
@@ -115,9 +113,10 @@ const completed = (result, review) =>
   Array.isArray(review?.findings) &&
   review.findings.every((f) => Object.hasOwn(severities, severityOf(f)));
 
-// Each reviewer as [{ name, result, review }], with its structured output parsed.
+// Each reviewer as [{ name, model, result, review }], with its structured
+// output parsed.
 const parsed = (reviewers) =>
-  reviewers.map(({ name, result, output }) => ({ name, result, review: parseReview(output) }));
+  reviewers.map(({ name, model, result, output }) => ({ name, model, result, review: parseReview(output) }));
 
 module.exports = {
   cap,
