@@ -5,12 +5,12 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { statusContext, humanStatusContext } = require('./claude-review.cjs');
+const { statusContext, humanStatusContext } = require('./ai-review.cjs');
 const { readRepo } = require('./test-helpers.cjs');
 const { tempDir } = require('./test-git.cjs');
 
 test('the merge queue passes the same statuses without a checkout or OIDC token', () => {
-  const workflow = readRepo('.github/workflows/claude-review-merge-queue.yml');
+  const workflow = readRepo('.github/workflows/ai-review-merge-queue.yml');
   assert.match(workflow, /\non:\n {2}workflow_call:\n/u);
   assert.match(workflow, /if: github\.event_name == 'merge_group'\n/u);
   assert.match(workflow, new RegExp(`\\n {10}for status in ${statusContext} ${humanStatusContext}; do\\n`, 'u'));
@@ -20,12 +20,12 @@ test('the merge queue passes the same statuses without a checkout or OIDC token'
 
 // Runs the merge queue's step with a gh that fails its first `failures` calls.
 function passMergeGroup(t, failures) {
-  const workflow = readRepo('.github/workflows/claude-review-merge-queue.yml');
+  const workflow = readRepo('.github/workflows/ai-review-merge-queue.yml');
   const script = workflow
     .split('- name: Pass the merge group\n')[1]
     .split('run: |\n')[1]
     .replaceAll(/^ {10}/gmu, '');
-  const dir = tempDir(t, 'claude-review-');
+  const dir = tempDir(t, 'ai-review-');
   const calls = path.join(dir, 'calls');
   fs.writeFileSync(calls, '');
   fs.writeFileSync(

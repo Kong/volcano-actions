@@ -1,8 +1,8 @@
-# Re-sets the `claude-review/human` status that claude-review.yml reports, when
-# a review, a dismissal, or the needs-human-review label changes who must
-# still weigh in. claude-review.yml describes how the status is decided. When
-# Claude's review of the head did not complete, an approval of that commit by a
-# writer other than the author also passes its `claude-review/verdict`.
+# Re-sets the `ai-review/human` status that ai-review.yml reports, when a
+# review, a dismissal, or the needs-human-review label changes who must still
+# weigh in. ai-review.yml describes how the status is decided. When no AI
+# review of the head completed, an approval of that commit by a writer other
+# than the author also passes its `ai-review/verdict`.
 #
 # - A pull_request_review run uses the PR's own copy of its workflow, so a PR
 #   could change what it does. Callers run a no-op workflow on reviews and call
@@ -10,14 +10,14 @@
 # - Label events come through pull_request_target, which reads the stub from
 #   the base branch.
 # - The job never checks out the PR and holds no OIDC token: it reads the PR's
-#   reviews, summary comment, and commit statuses, sets `claude-review/human`
-#   and, for an incomplete review approved at its head, `claude-review/verdict`,
+#   reviews, summary comment, and commit statuses, sets `ai-review/human`
+#   and, for an incomplete review approved at its head, `ai-review/verdict`,
 #   and may request the reviewer the summary comment suggests.
 # - Runs for one head wait rather than cancel each other, so the last one reads
 #   the latest reviews. Callers set no concurrency, so they cannot deadlock
 #   with this workflow's group.
 
-name: Claude Review (human gate)
+name: AI Review (human gate)
 
 on:
   workflow_call:
@@ -25,7 +25,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: claude-review-human-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  group: ai-review-human-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -41,6 +41,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/claude-review@2848b9b311558cb0f00b871cdefe555242d213f8
+      - uses: Kong/volcano-actions/.github/actions/ai-review@15e8b813d7aa3d7645e6e258fb5b40b1ed3a890b
         with:
           step: gate

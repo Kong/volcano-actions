@@ -1,32 +1,76 @@
 # volcano-actions
 
 Shared GitHub Actions and reusable workflows for Volcano repositories. The
-`guided-review` and `pr-review` skills that the Claude review mentions live in
+`guided-review` and `pr-review` skills that the AI review mentions live in
 [`Kong/volcano-conventions`](https://github.com/Kong/volcano-conventions).
 
-## Claude review
+## AI review
 
-`.github/workflows/claude-review.yml` reviews each push to a same-repository
-pull request with Claude and Codex and reports the `claude-review/verdict` commit status
-on the reviewed head. P0-P2 findings fail it; a human collaborator with write or
-admin access, including the PR author, can accept one head with the
-`claude-review-override` label. This includes fork PRs, which Claude does not
-review. The label is removed after processing. Each new commit needs its own
-override. Volcano repositories call it instead of keeping their own copy, so a
-fix lands once.
+`.github/workflows/ai-review.yml` reviews each push to a same-repository pull
+request with several AI reviewers and reports one `ai-review/verdict` commit
+status on the reviewed head. P0-P2 findings fail it; a human collaborator with
+write or admin access, including the PR author, can accept one head with the
+`ai-review-override` label. This includes fork PRs, which the AI review does
+not run on. The label is removed after processing. Each new commit needs its
+own override. Volcano repositories call it instead of keeping their own copy,
+so a fix lands once.
 
-OpenAI's Codex reviews each head beside Claude, from the same inputs, in a
-read-only sandbox with no network. The verdict and the summary comment combine
-both reviews: a P0-P2 finding from either fails the verdict, and either can ask
-for a person. When one provider has an outage or its review otherwise does not
-complete, the other's verdict stands alone and the comment says so. When
-neither completes, the verdict is an error and the head waits for a person, as
-described below.
+### Reviewers
 
-It also reports `claude-review/human`, which says whether the head still needs
-a person's review. It waits for one when:
+Each reviewer is a job in `ai-review.yml` that runs one provider: today Claude
+(the `claude` job) and OpenAI's Codex (the `codex` job). They review the same
+head from the same inputs, under one policy and output schema that ship with
+the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 
-- Claude judges the change risky: one that cannot be undone, moves a trust
+- The action's `prepare` step builds the inputs in a checkout of the base
+  branch: the diff, commit messages, description, and inline comments; a
+  checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
+  `.mcp.json` files; the base's instruction files that govern the changed
+  paths; and the reviewer candidates. Its outputs give the reviewer the policy,
+  with the caller's `focus` applied, and the schema, along with a copy without
+  `maxLength` for providers whose structured outputs reject it.
+- Each job adds only what its provider needs: how it reads files and returns
+  its verdict, and its own hardening. Claude reads the checkouts with no shell.
+  Codex reads them in a read-only sandbox with no network, after the job drops
+  the checkout's credentials. No reviewer job holds a write token; the verdict
+  job posts the comments.
+
+One verdict combines every reviewer, and the summary comment reads as a
+single review that names no reviewer or provider, however many ran:
+
+- A P0-P2 finding from any reviewer fails it. Any reviewer can ask for a
+  person.
+- The comment lists every reviewer's findings once. Each finding on a line also
+  gets an inline comment whose footer names the model that found it, so two
+  models reporting the same problem leave two comments.
+- When a provider has an outage or its review otherwise does not complete, the
+  other reviewers' verdict stands, and the run log warns which one is missing.
+  When none completes, the verdict is an error and the head waits for a
+  person, as described below.
+
+To add a provider, change only the workflow; the verdict reads any number of
+reviewers:
+
+1. Add a job to `ai-review.yml` like `claude` and `codex`. It requires its API
+   key, checks out the base, runs the action with `step: prepare`, and then
+   runs the provider with prepare's `policy` and `schema` (or
+   `schema-without-max-length`) and its own prompt lines. Its outputs are
+   `reviewer`, the name the run log uses; `model`, the model its inline
+   comments name; `findings`, its structured output; and `candidates`, from
+   prepare.
+2. List the job in the `verdict` job's `needs`.
+3. Add its API key to the workflow's secrets, with `required: false`, and to
+   the caller stubs below.
+4. Add the job to the provider list in
+   `.github/actions/ai-review/reviewer-jobs.test.cjs`, whose tests hold every
+   reviewer job to these rules.
+
+### Human review
+
+It also reports `ai-review/human`, which says whether the head still needs a
+person's review. It waits for one when:
+
+- A reviewer judges the change risky: one that cannot be undone, moves a trust
   boundary (including a new third-party dependency, or CI or review
   configuration that gains access or weakens a check), breaks a contract
   others rely on, changes billing or pricing, does something its description
@@ -41,48 +85,51 @@ than the author approves. Like the repositories' required approvals today, an
 approval carries across later pushes. Changes requested by a collaborator
 with write access hold it until they approve or their review is dismissed.
 The summary comment lists each reason as a question for the person to decide,
-and what the review could not check, such as behavior only running the code
-shows. When Claude found nothing blocking, read the whole change closely, and
-gave its own reasons, the comment says the code needs no second review for
-bugs, and the marker that ends it records `cleared`. It never says so for a
-path in `human_review_paths`, or for a PR labeled `needs-human-review` when the
-review publishes. The `guided-review` skill reads the marker, the labels, and
-`claude-review/human`, so a label added later still counts. It walks the
-reviewer through those decisions, runs `pr-review` only when the code is not
-cleared, and posts their answers, once they confirm, as their review of that
-commit.
-Requiring this status instead of an approval lets a PR merge on Claude's review
+and what the reviews could not check, such as behavior only running the code
+shows. When the reviews found nothing blocking, each read the whole change
+closely, and each that asked for a person gave its own reasons, the comment
+says the code needs no second review for bugs, and the marker that ends it
+records `cleared`. It never says so for a path in `human_review_paths`, or for
+a PR labeled `needs-human-review` when the review publishes. The
+`guided-review` skill reads the marker, the labels, and `ai-review/human`, so a
+label added later still counts. It walks the reviewer through those decisions,
+runs `pr-review` only when the code is not cleared, and posts their answers,
+once they confirm, as their review of that commit.
+Requiring this status instead of an approval lets a PR merge on the AI review
 alone when nothing needs a person.
 
-If neither review completes, for example during an outage of both providers,
-the verdict is an error and the head needs a human review. An approval of that
+If no review completes, for example during an outage of every provider, the
+verdict is an error and the head needs a human review. An approval of that
 exact commit by a collaborator with write access other than the author stands
 in for the review and passes both statuses; an approval of an earlier commit
 does not, since nobody read the new one. A verdict with findings still takes a
 fix or the override label.
 
-When it waits, the review requests one collaborator by name: Claude's pick
-among the people with write access and recent commits to the changed files,
-falling back to whoever has the most, unless someone was already requested by
-name or has reviewed. A team request, such as from CODEOWNERS, does not count,
-so a repository that opts in can drop a catch-all CODEOWNERS line.
+When it waits, the review requests one collaborator by name: the first
+reviewer's pick among the people with write access and recent commits to the
+changed files, falling back to whoever has the most, unless someone was
+already requested by name or has reviewed. A team request, such as from
+CODEOWNERS, does not count, so a repository that opts in can drop a catch-all
+CODEOWNERS line.
+
+### Setup
 
 To add it to a repository:
 
 1. Make the `ANTHROPIC_CI_API_KEY` and `OPENAI_CI_API_KEY` secrets available
    to the repository's Actions, as organization or repository secrets. The
    stubs below pass them to the review, which calls Claude and Codex with them.
-2. Protect `main` and require the `claude-review/verdict` status on it, with
+2. Protect `main` and require the `ai-review/verdict` status on it, with
    GitHub Actions as the expected source. Otherwise anyone with write access
    can satisfy it by posting a status with their own token.
-3. Create the `claude-review-override` label with the description:
-   "Accept this head's Claude review (write access, PR author included)".
+3. Create the `ai-review-override` label with the description:
+   "Accept this head's AI review (write access, PR author included)".
    Create the `needs-human-review` label with the description:
-   "Hold this PR for a human review, whatever Claude decides".
-4. Add `.github/workflows/claude-review.yml`:
+   "Hold this PR for a human review, whatever the AI review decides".
+4. Add `.github/workflows/ai-review.yml`:
 
    ```yaml
-   name: Claude Review
+   name: AI Review
 
    on:
      pull_request_target:
@@ -92,8 +139,8 @@ To add it to a repository:
    permissions: {}
 
    jobs:
-     claude-review:
-       uses: Kong/volcano-actions/.github/workflows/claude-review.yml@main
+     ai-review:
+       uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
        permissions:
          contents: read
          pull-requests: write
@@ -103,10 +150,10 @@ To add it to a repository:
          openai_api_key: ${{ secrets.OPENAI_CI_API_KEY }}
    ```
 
-   And `.github/workflows/claude-review-retarget-override.yml`:
+   And `.github/workflows/ai-review-retarget-override.yml`:
 
    ```yaml
-   name: Claude Review (retarget and override)
+   name: AI Review (retarget and override)
 
    on:
      pull_request_target:
@@ -117,8 +164,8 @@ To add it to a repository:
 
    jobs:
      retarget-or-override:
-       if: github.event.changes.base || github.event.label.name == 'claude-review-override'
-       uses: Kong/volcano-actions/.github/workflows/claude-review.yml@main
+       if: github.event.changes.base || github.event.label.name == 'ai-review-override'
+       uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
        permissions:
          contents: read
          pull-requests: write
@@ -138,11 +185,11 @@ To add it to a repository:
    caller group deadlocks it. Both workflows share that group, so a retarget
    still cancels a review of the old base.
 
-   For `claude-review/human` to follow reviews and the `needs-human-review`
-   label, add `.github/workflows/claude-review-approvals.yml`:
+   For `ai-review/human` to follow reviews and the `needs-human-review`
+   label, add `.github/workflows/ai-review-approvals.yml`:
 
    ```yaml
-   name: Claude Review (approvals)
+   name: AI Review (approvals)
 
    on:
      pull_request_review:
@@ -152,22 +199,22 @@ To add it to a repository:
 
    jobs:
      # A review runs the PR's own copy of this workflow, so it only finishes;
-     # Claude Review (human gate) then runs from the default branch.
+     # AI Review (human gate) then runs from the default branch.
      reviewed:
        runs-on: ubuntu-latest
        timeout-minutes: 5
        steps:
-         - run: echo "Claude Review (human gate) re-sets claude-review/human."
+         - run: echo "AI Review (human gate) re-sets ai-review/human."
    ```
 
-   And `.github/workflows/claude-review-human.yml`:
+   And `.github/workflows/ai-review-human.yml`:
 
    ```yaml
-   name: Claude Review (human gate)
+   name: AI Review (human gate)
 
    on:
      workflow_run:
-       workflows: [Claude Review (approvals)]
+       workflows: [AI Review (approvals)]
        types: [completed]
      pull_request_target:
        branches: [main]
@@ -178,7 +225,7 @@ To add it to a repository:
    jobs:
      human-gate:
        if: github.event_name == 'workflow_run' || github.event.label.name == 'needs-human-review'
-       uses: Kong/volcano-actions/.github/workflows/claude-review-human.yml@main
+       uses: Kong/volcano-actions/.github/workflows/ai-review-human.yml@main
        permissions:
          contents: read
          pull-requests: write
@@ -190,11 +237,11 @@ To add it to a repository:
    PR cannot change it. Keep the first workflow's name as the second lists it.
 
 5. If the repository uses a merge queue, add
-   `.github/workflows/claude-review-merge-queue.yml`, so merge-group commits
+   `.github/workflows/ai-review-merge-queue.yml`, so merge-group commits
    pass the required statuses:
 
    ```yaml
-   name: Claude Review (merge queue)
+   name: AI Review (merge queue)
 
    on:
      merge_group:
@@ -205,31 +252,30 @@ To add it to a repository:
 
    jobs:
      pass:
-       uses: Kong/volcano-actions/.github/workflows/claude-review-merge-queue.yml@main
+       uses: Kong/volcano-actions/.github/workflows/ai-review-merge-queue.yml@main
        permissions:
          statuses: write
    ```
 
-6. To merge on Claude's review alone when nothing needs a person, first watch
+6. To merge on the AI review alone when nothing needs a person, first watch
    the summary comments' **Human review** lines for a while with approvals
    still required. Then, in the ruleset for `main`, require the
-   `claude-review/human` status with GitHub Actions as the expected source,
-   and set required approvals to 0.
+   `ai-review/human` status with GitHub Actions as the expected source, and
+   set required approvals to 0.
 
 The status guards against mistakes, not against collaborators with write
 access, who can already post a status through a workflow on their own branch
 or edit the summary comment it reads.
 
-The reviewer reads the repository's base-branch `AGENTS.md` and `CLAUDE.md`,
+The reviewers read the repository's base-branch `AGENTS.md` and `CLAUDE.md`,
 so keep repository rules there. MCP servers in the repository's `.mcp.json`
 do not run in the review. For review emphasis those files do not cover,
-or for other bots, pass inputs. Pass the same ones in both
-`claude-review.yml` and `claude-review-retarget-override.yml`, since a
-retarget reviews the PR again:
+or for other bots, pass inputs. Pass the same ones in both `ai-review.yml`
+and `ai-review-retarget-override.yml`, since a retarget reviews the PR again:
 
 ```yaml
 jobs:
-  claude-review:
+  ai-review:
     # uses, permissions, and secrets as above
     with:
       focus: |
@@ -244,21 +290,19 @@ jobs:
 repository root: `*` stays within a directory, `**/` spans any number of them,
 and lines starting with `#` are comments.
 
+### Changing the review
+
 Callers using `@main` receive workflow changes when they merge here. Callers
-pinned to a workflow SHA need a reference update. The workflow pins its nested
-composite action to a full commit SHA, so action changes do not roll out until
-all five action references are updated, four in `claude-review.yml` and one
-in `claude-review-human.yml`.
+pinned to a workflow SHA need a reference update. The workflows pin the
+composite action to a full commit SHA, so action changes, including the
+policy and schema that ship with it, do not roll out until every reference to
+it in `ai-review.yml` and `ai-review-human.yml` is updated.
 
 For action changes, merge the implementation first. In a separate PR, update
-the workflow's action pins to the resulting commit on `main`, using the squash
+the workflows' action pins to the resulting commit on `main`, using the squash
 commit when applicable. Never pin an unmerged PR commit: CI fetches `main`'s
-history to test the pinned verdict.
-
-For severity additions, removals, or renames, first merge and unit-test the action
-change while retaining the existing workflow pin and schema. Then update the
-pins and schema together. The test suite checks the deployed severity vocabulary
-independently of the current action's unit tests. Before pushing, run:
+history to test the pinned action, and checks its severities against its own
+schema. Before pushing, run:
 
 ```sh
 npm test

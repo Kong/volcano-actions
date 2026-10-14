@@ -5,7 +5,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "test": "node --test '.github/actions/*/*.test.cjs'"
+    "test": "node --test '.github/actions/ai-review/*.test.cjs'"
   },
   "devDependencies": {
     "oxfmt": "0.73.0",
