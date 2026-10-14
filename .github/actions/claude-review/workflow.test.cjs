@@ -53,7 +53,14 @@ test("the review calls Claude with the caller's API key", () => {
   const { review } = jobsOf(workflow);
   assert.match(review, /\n {10}anthropic_api_key: \$\{\{ secrets\.anthropic_api_key \}\}\n/u);
   assert.doesNotMatch(workflow, /anthropic_(?:federation_rule|organization|service_account|workspace)_id/u);
-  assert.match(workflow, /\n {4}secrets:\n {6}anthropic_api_key:\n(?: {8}.*\n)*? {8}required: true\n/u);
+  assert.match(workflow, /\n {4}secrets:\n {6}anthropic_api_key:\n(?: {8}.*\n)*? {8}required: false\n/u);
+  // A missing key fails the review job, so the verdict is an error rather than absent.
+  const guard = review.split('\n      - ')[1];
+  assert.match(
+    guard,
+    /^name: Require the API key\n {8}env:\n {10}KEY_SET: \$\{\{ secrets\.anthropic_api_key != '' \}\}\n/u,
+  );
+  assert.match(guard, /exit 1\n/u);
 });
 
 test('only events for one head share a review run group', () => {
