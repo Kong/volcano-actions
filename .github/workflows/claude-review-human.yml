@@ -1,0 +1,46 @@
+# Re-sets the `claude-review/human` status that claude-review.yml reports, when
+# a review, a dismissal, or the needs-human-review label changes who must
+# still weigh in. claude-review.yml describes how the status is decided. When
+# Claude's review of the head did not complete, an approval of that commit by a
+# writer other than the author also passes its `claude-review/verdict`.
+#
+# - A pull_request_review run uses the PR's own copy of its workflow, so a PR
+#   could change what it does. Callers run a no-op workflow on reviews and call
+#   this one from workflow_run, which reads its stub from the default branch.
+# - Label events come through pull_request_target, which reads the stub from
+#   the base branch.
+# - The job never checks out the PR and holds no OIDC token: it reads the PR's
+#   reviews, summary comment, and commit statuses, sets `claude-review/human`
+#   and, for an incomplete review approved at its head, `claude-review/verdict`,
+#   and may request the reviewer the summary comment suggests.
+# - Runs for one head wait rather than cancel each other, so the last one reads
+#   the latest reviews. Callers set no concurrency, so they cannot deadlock
+#   with this workflow's group.
+
+name: Claude Review (human gate)
+
+on:
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: claude-review-human-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request_review') ||
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'needs-human-review')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    steps:
+      # This job has a write token. Never check out the PR.
+      - uses: Kong/volcano-actions/.github/actions/claude-review@276216b4caacee90198c13e13777a26842f033d7
+        with:
+          step: gate

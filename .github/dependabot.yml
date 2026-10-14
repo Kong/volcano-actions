@@ -1,0 +1,21 @@
+version: 2
+# No Dependabot label exists here, so `labels: []`: Dependabot comments on every
+# PR about missing labels and creates its defaults when the key is omitted.
+updates:
+  # One PR per action across all directories, so every reference moves to the
+  # same pinned commit.
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+    labels: []
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    cooldown:
+      default-days: 5
+    groups:
+      actions:
+        group-by: dependency-name

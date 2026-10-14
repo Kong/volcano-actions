@@ -1,0 +1,40 @@
+# Reports the `claude-review/verdict` and `claude-review/human` statuses that
+# claude-review.yml gates PRs on for merge-group commits. Each queued PR passed
+# both on its head to enter the queue, so the merge-group commit passes without
+# another review.
+# Callers run this from a merge_group workflow apart from their
+# claude-review.yml caller, because a workflow that runs in the merge queue may
+# not hold an OIDC token, and the review job needs one.
+
+name: Claude Review (merge queue)
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  pass:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      # A status that never posts holds the queue until its check timeout, so
+      # each post is retried. Posting one again is harmless: the latest wins.
+      - name: Pass the merge group
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          for status in claude-review/verdict claude-review/human; do
+            for attempt in 1 2 3 4 5; do
+              gh api "repos/$REPO/statuses/$SHA" -f state=success -f context="$status" \
+                -f description="Each queued PR passed review on its head." > /dev/null && break
+              [ "$attempt" -lt 5 ] || exit 1
+              echo "::warning::Posting $status failed (attempt $attempt of 5); retrying."
+              sleep $((attempt * 5))
+            done
+          done
