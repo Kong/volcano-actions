@@ -185,7 +185,7 @@ jobs:
           # --strict-mcp-config (below) loads only the action's own MCP servers:
           # the action enables every project .mcp.json server, and a caller's
           # can fetch and run unpinned code (for example `npx pkg@latest`) on
-          # a runner that holds the API key and a pull-request-write token.
+          # a runner that holds the API key and the job's token.
           settings: |
             {"permissions":{"blockReadsOutsideWorkingDirectories":true,"disableBypassPermissionsMode":"disable","deny":["Read(/${{ github.workspace }}/.git/**)","WebFetch","WebSearch"]}}
           prompt: |
