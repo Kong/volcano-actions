@@ -302,13 +302,14 @@ jobs:
       # Codex's commands see only a fresh /proc, and so none of this job's
       # processes, unless the sandbox cannot mount one: then it silently keeps
       # the host's, where the token sits in the environment of Codex itself.
-      # A canary named like a token takes the token's place.
+      # A canary named like a token takes the token's place, in a shell and
+      # Codex both started with it, as the review step's are.
       - name: Check that Codex's commands cannot read its environment
         run: |
           canary=$(openssl rand -hex 16)
           errors="$RUNNER_TEMP/codex-sandbox-errors.txt"
-          seen=$(CANARY_TOKEN=$canary codex -c 'shell_environment_policy.ignore_default_excludes=false' \
-            sandbox -P ':read-only' -- sh -c 'echo sandboxed; cat /proc/[0-9]*/environ' 2>"$errors" | tr '\0' '\n' || true)
+          seen=$(CANARY_TOKEN=$canary bash -c "codex -c 'shell_environment_policy.ignore_default_excludes=false' \
+            sandbox -P ':read-only' -- sh -c 'echo sandboxed; cat /proc/[0-9]*/environ'" 2>"$errors" | tr '\0' '\n' || true)
           case "$seen" in
             *"$canary"*) echo "::error::Codex's sandboxed commands can read the environment Codex runs in." && exit 1 ;;
             *sandboxed*) ;;
