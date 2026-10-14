@@ -34,7 +34,7 @@ test('the workflow keeps the reviewer inside its trust boundary', () => {
     assert.match(jobs[name], /github\.event_name == 'pull_request_target'/u, name);
   assert.match(workflow, /\npermissions: \{\}\n/u);
 
-  // Forks never reach the job that holds the federation token.
+  // Forks never reach the job that holds the API key.
   assert.match(jobs.start, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/u);
   // The payload's draft flag can be stale; start() checks the live PR.
   assert.doesNotMatch(workflow, /pull_request\.draft/u);
