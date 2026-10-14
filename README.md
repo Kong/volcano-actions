@@ -7,7 +7,7 @@ Shared GitHub Actions and reusable workflows for Volcano repositories. The
 ## Claude review
 
 `.github/workflows/claude-review.yml` reviews each push to a same-repository
-pull request with Claude and reports the `claude-review/verdict` commit status
+pull request with Claude and Codex and reports the `claude-review/verdict` commit status
 on the reviewed head. P0-P2 findings fail it; a human collaborator with write or
 admin access, including the PR author, can accept one head with the
 `claude-review-override` label. This includes fork PRs, which Claude does not
