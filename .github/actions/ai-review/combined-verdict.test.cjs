@@ -62,6 +62,17 @@ test('a P0-P2 finding from either review fails the verdict, counted once however
   }
 });
 
+test("the summary is the first blocking review's when any review blocks, else the first review's", () => {
+  const summary = (v) => v.body.split('\n')[5];
+  const blocks = { summary: 'Breaks lookups.', findings: [finding('p2')] };
+  assert.equal(summary(both({ findings: [finding('p3')] }, blocks)), 'Breaks lookups.');
+  assert.equal(summary(both(blocks, { summary: 'Also breaks.', findings: [finding('p1')] })), 'Breaks lookups.');
+  assert.equal(summary(both({ findings: [finding('p3')] }, { summary: 'Caches lookups.' })), 'Adds a cache.');
+  // A review that did not complete has no say in the summary.
+  const v = pair(['failure', reviewJson(blocks)], ['success', reviewJson({ summary: 'Caches lookups.' })]);
+  assert.equal(summary(v), 'Caches lookups.');
+});
+
 test('either review can ask for a person, and their reasons and gaps combine without repeats', () => {
   const v = both(
     { human: asks(['Changes billing.', 'Adds a table.']), notChecked: ['A.', 'B.', 'C.'] },
@@ -106,26 +117,30 @@ test('the code is cleared only when every review read it closely and asks a pers
   }
 });
 
-test('a review that did not complete leaves the verdict to the other, and only the run log says so', () => {
+test('a review that did not complete leaves the verdict to the other, and the comment counts it without names', () => {
   const codexOnly = pair(
     ['failure', ''],
     ['success', reviewJson({ summary: 'Caches lookups.', findings: [finding('p3')], notChecked: ['Load.'] })],
   );
   assert.equal(codexOnly.state, 'success');
-  assert.equal(codexOnly.description, 'No P0-P2 findings (1 P3, 0 pre-existing).');
+  assert.equal(codexOnly.description, 'No P0-P2 findings (1 P3, 0 pre-existing; 1 of 2 reviews did not complete).');
   assert.ok(
     codexOnly.body.startsWith(
-      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. [Run log](${url})\n\nCaches lookups.\n\n**⚪ P3**\n`,
+      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. 1 of 2 reviews did not complete. [Run log](${url})\n\nCaches lookups.\n\n**⚪ P3**\n`,
     ),
   );
   assert.ok(codexOnly.body.endsWith(`\n\n${ran}\n- Load.`));
-  assert.doesNotMatch(codexOnly.body, /Claude|Codex|did not complete/u);
+  assert.doesNotMatch(codexOnly.body, /Claude|Codex/u);
   assert.deepEqual([codexOnly.reasons, codexOnly.missed, codexOnly.by], [[], ['Claude'], 'Codex']);
 
   const claudeOnly = pair(['success', reviewJson({ findings: [finding('p1')] })], ['failure', '']);
   assert.equal(claudeOnly.state, 'failure');
-  assert.equal(claudeOnly.description, '1 P0-P2 finding(s). See the AI review comment.');
-  assert.doesNotMatch(claudeOnly.body, /Claude|Codex|did not complete/u);
+  assert.equal(
+    claudeOnly.description,
+    '1 P0-P2 finding(s); 1 of 2 reviews did not complete. See the AI review comment.',
+  );
+  assert.match(claudeOnly.body, /\nReviewed abcdef1\. 1 of 2 reviews did not complete\. \[Run log\]/u);
+  assert.doesNotMatch(claudeOnly.body, /Claude|Codex/u);
   assert.deepEqual(claudeOnly.reasons, []);
   for (const output of ['', 'not json', JSON.stringify({ findings: [] }), reviewJson({ findings: [finding('nit')] })]) {
     const v = pair(['success', reviewJson()], ['success', output]);

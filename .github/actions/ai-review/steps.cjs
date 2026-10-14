@@ -116,15 +116,16 @@ const inlineComments = (reviewers) =>
     );
 
 // Posts the inline comments on the reviewed head. Reviewers may comment on the
-// same problem. Each model comments once per line: its wording varies between
-// runs, so a later push skips a line where the same model already commented.
-// Comments sit beside the verdict, so no failure here fails the job.
+// same problem. A model's wording varies between runs, so a later push skips a
+// line where this action already posted the same model's finding at the same
+// level; comments by anyone else never count. Comments sit beside the verdict,
+// so no failure here fails the job.
 async function postFindings({ github, context, core }, reviewers) {
   const pr = context.payload.pull_request;
-  const comments = inlineComments(reviewers);
+  const comments = [...new Map(inlineComments(reviewers).map((c) => [JSON.stringify(c), c])).values()];
   if (comments.length === 0) return;
-  const signature = (body) => String(body).slice(String(body).lastIndexOf('\n') + 1);
-  const at = (c) => JSON.stringify([c.path, c.line, signature(c.body)]);
+  const lines = (body) => String(body).split('\n');
+  const at = (c) => JSON.stringify([c.path, c.line, lines(c.body)[0].split(':**')[0], lines(c.body).at(-1)]);
   let posted;
   try {
     const existing = await github.paginate(github.rest.pulls.listReviewComments, {
@@ -132,14 +133,13 @@ async function postFindings({ github, context, core }, reviewers) {
       pull_number: pr.number,
       per_page: 100,
     });
-    posted = new Set(existing.map((c) => at(c)));
+    posted = new Set(existing.filter((c) => c.user?.login === 'github-actions[bot]').map((c) => at(c)));
   } catch (error) {
     core.warning(`Could not list the PR's review comments, so none were posted: ${error.message}`);
     return;
   }
   for (const comment of comments) {
     if (posted.has(at(comment))) continue;
-    posted.add(at(comment));
     try {
       await github.rest.pulls.createReviewComment({
         ...context.repo,

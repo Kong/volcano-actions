@@ -72,7 +72,9 @@ test('publish warns once for each review that did not complete', async (t) => {
     'The Claude review of abcdef1 did not complete, so the verdict rests on Codex.',
     'The Gemini review of abcdef1 did not complete, so the verdict rests on Codex.',
   ]);
-  assert.deepEqual(c.set(statusContext), [[sha, 'success', 'No P0-P2 findings (0 P3, 0 pre-existing).']]);
+  assert.deepEqual(c.set(statusContext), [
+    [sha, 'success', 'No P0-P2 findings (0 P3, 0 pre-existing; 2 of 3 reviews did not complete).'],
+  ]);
   assert.deepEqual(c.set(humanStatusContext), [[sha, 'success', 'No human review needed.']]);
 });
 

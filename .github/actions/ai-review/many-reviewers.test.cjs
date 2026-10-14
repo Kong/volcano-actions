@@ -91,19 +91,21 @@ test('the code is cleared only when every completed review would clear it', () =
   assert.ok(!three([{ human: routine }, { human: routine }, { human: routine }]).cleared);
 });
 
-test('reviews that did not complete leave the verdict to the rest, without a mark in the comment', () => {
+test('reviews that did not complete leave the verdict to the rest, counted but never named', () => {
   const one = three([{ findings: [finding('p3')] }, ['failure', ''], { notChecked: ['Load.'] }]);
   assert.equal(one.state, 'success');
-  assert.equal(one.description, 'No P0-P2 findings (1 P3, 0 pre-existing).');
+  assert.equal(one.description, 'No P0-P2 findings (1 P3, 0 pre-existing; 1 of 3 reviews did not complete).');
+  assert.ok(one.body.includes(`\n\nReviewed abcdef1. 1 of 3 reviews did not complete. [Run log](${url})\n\n`));
   assert.ok(one.body.endsWith(`\n\n${ran}\n- Load.`));
-  assert.doesNotMatch(one.body, /Claude|Codex|Gemini|did not complete/u);
+  assert.doesNotMatch(one.body, /Claude|Codex|Gemini/u);
   assert.deepEqual([one.reasons, one.missed, one.by], [[], ['Codex'], 'Claude and Gemini']);
 
   const two = three([['cancelled', reviewJson()], { findings: [finding('p1')] }, ['success', 'not json']]);
   assert.equal(two.state, 'failure');
-  assert.equal(two.description, '1 P0-P2 finding(s). See the AI review comment.');
+  assert.equal(two.description, '1 P0-P2 finding(s); 2 of 3 reviews did not complete. See the AI review comment.');
+  assert.match(two.body, /\nReviewed abcdef1\. 2 of 3 reviews did not complete\. \[Run log\]/u);
   assert.match(two.body, /\n\n\*\*🟠 P1\*\*\n- `internal\/a\.go:12` Nil map write\n/u);
-  assert.doesNotMatch(two.body, /Claude|Codex|Gemini|did not complete/u);
+  assert.doesNotMatch(two.body, /Claude|Codex|Gemini/u);
   assert.deepEqual([two.reasons, two.missed, two.by], [[], ['Claude', 'Gemini'], 'Codex']);
 });
 

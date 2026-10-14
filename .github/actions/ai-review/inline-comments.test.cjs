@@ -40,7 +40,10 @@ test("publish posts each completed review's findings on a line, signed by its mo
   const order = c.calls.map((call) => call.call);
   assert.ok(order.indexOf('createComment') < order.indexOf('listReviewComments'));
   // The summary lists a problem two reviewers found once; each still comments.
-  assert.deepEqual(c.set(statusContext)[0].slice(1), ['failure', '1 P0-P2 finding(s). See the AI review comment.']);
+  assert.deepEqual(c.set(statusContext)[0].slice(1), [
+    'failure',
+    '1 P0-P2 finding(s); 1 of 3 reviews did not complete. See the AI review comment.',
+  ]);
   assert.deepEqual(
     [k.failures, k.warnings],
     [[], ['The Gemini review of abcdef1 did not complete, so the verdict rests on Claude and Codex.']],
@@ -73,21 +76,29 @@ test('every level reads as the reviewers label it, and long text is capped', asy
   assert.ok(posted[0][2].endsWith(`<sub>Found by ${'m'.repeat(99)}…</sub>`));
 });
 
-test('publish skips a line where the same model already commented, whatever its wording', async (t) => {
+const bot = { login: 'github-actions[bot]' };
+
+test("publish skips a line where it already posted the model's finding at that level, whatever its wording", async (t) => {
   clearAfter(t, 'REVIEWS');
   const { c, posted } = await publishWith(
     [['Claude', 'success', reviewJson({ findings: [nilMap, nilMap, typo, fileLevel] }), '', 'claude-opus-5-5']],
     {
       reviewComments: [
-        // The same model at the same line, worded differently on an earlier run.
+        // The same model and level at the same line, worded differently on an earlier run.
         {
+          user: bot,
           path: 'internal/a.go',
           line: 12,
           body: '**🟠 P1:** A nil map write panics\n\n<sub>Found by claude-opus-5-5</sub>',
         },
         // The same model at another line, and another model at the same line.
-        { path: 'docs/a.md', line: 4, body: '**⚪ P3:** Typo @​kong/docs\n\n<sub>Found by claude-opus-5-5</sub>' },
-        { path: 'docs/a.md', line: 3, body: '**⚪ P3:** Typo\n\n<sub>Found by gpt-6.1-sol</sub>' },
+        {
+          user: bot,
+          path: 'docs/a.md',
+          line: 4,
+          body: '**⚪ P3:** Typo @\u200Bkong/docs\n\n<sub>Found by claude-opus-5-5</sub>',
+        },
+        { user: bot, path: 'docs/a.md', line: 3, body: '**⚪ P3:** Typo\n\n<sub>Found by gpt-6.1-sol</sub>' },
       ],
     },
   );
@@ -96,6 +107,38 @@ test('publish skips a line where the same model already commented, whatever its 
     [['docs/a.md', 3]],
   );
   assert.equal(c.named('listReviewComments').length, 1);
+});
+
+test('comments by anyone else, or at another level, never suppress a finding', async (t) => {
+  clearAfter(t, 'REVIEWS');
+  const link = finding('p1', { path: 'docs/a.md', line: 3, title: 'Broken link' });
+  const { posted } = await publishWith(
+    [['Claude', 'success', reviewJson({ findings: [nilMap, link] }), '', 'claude-opus-5-5']],
+    {
+      reviewComments: [
+        // A forged footer from someone other than the action.
+        { user: { login: 'mallory' }, path: 'internal/a.go', line: 12, body: opus },
+        // The model's earlier P3 at the line does not cover a new P1 there.
+        { user: bot, path: 'docs/a.md', line: 3, body: '**⚪ P3:** Typo\n\n<sub>Found by claude-opus-5-5</sub>' },
+      ],
+    },
+  );
+  assert.deepEqual(posted, [
+    ['internal/a.go', 12, opus],
+    ['docs/a.md', 3, '**🟠 P1:** Broken link\n\n<sub>Found by claude-opus-5-5</sub>'],
+  ]);
+});
+
+test("a model's distinct findings on one line all post, and exact repeats post once", async (t) => {
+  clearAfter(t, 'REVIEWS');
+  const unchecked = finding('p1', { title: 'Unchecked error' });
+  const { posted } = await publishWith([
+    ['Claude', 'success', reviewJson({ findings: [nilMap, unchecked, nilMap] }), '', 'claude-opus-5-5'],
+  ]);
+  assert.deepEqual(posted, [
+    ['internal/a.go', 12, opus],
+    ['internal/a.go', 12, '**🟠 P1:** Unchecked error\n\n<sub>Found by claude-opus-5-5</sub>'],
+  ]);
 });
 
 test('a comment outside the diff is skipped with a notice, and other errors only warn', async (t) => {

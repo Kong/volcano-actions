@@ -54,16 +54,18 @@ const sameProblem = (f) =>
       .trim(),
   ]);
 
-// Several reviews as one: every finding without exact repeats, the first
-// review's summary, and every gap.
+// Several reviews as one: every finding without exact repeats, and every gap.
+// The summary is the first review's, or, when any review blocks, the first
+// blocking review's, so its risk call agrees with the heading.
 function union(reviews) {
   const shaped = reviews.map((r) => shape(r));
   const findings = new Map();
   for (const f of shaped.flatMap((r) => r.findings)) {
     if (!findings.has(sameProblem(f))) findings.set(sameProblem(f), f);
   }
+  const blocks = shaped.find((r) => r.findings.some((f) => failing.has(f.severity)));
   return {
-    summary: shaped[0].summary,
+    summary: (blocks ?? shaped[0]).summary,
     findings: [...findings.values()],
     notChecked: shaped.flatMap((r) => r.notChecked),
   };
@@ -92,7 +94,7 @@ const blockingIn = (findings) => findings.filter((f) => failing.has(f.severity))
 
 // The comment's findings, most severe first, and what the review could not
 // check, all from the one review it shows.
-function findingsBody({ shown, failed, notChecked, short, url }) {
+function findingsBody({ shown, failed, notChecked, short, url, coverage }) {
   const item = (f) => `- ${code(f.line > 0 ? `${f.path}:${f.line}` : f.path)} ${clean(f.title)}`;
   const body = [
     marker,
@@ -100,7 +102,7 @@ function findingsBody({ shown, failed, notChecked, short, url }) {
       ? `### ${heading}: ${blockingIn(shown.findings).length} P0-P2 finding(s)`
       : `### ${heading}: no P0-P2 findings`,
     '',
-    `Reviewed ${short}. [Run log](${url})`,
+    `Reviewed ${short}.${coverage && ` ${coverage}.`} [Run log](${url})`,
     '',
     clean(shown.summary),
   ];
@@ -113,11 +115,17 @@ function findingsBody({ shown, failed, notChecked, short, url }) {
 }
 
 // Counts the findings the comment shows, so the status and comment agree.
-function describe(failed, findings) {
-  if (failed) return fit(`${blockingIn(findings).length} P0-P2 finding(s). See the ${heading} comment.`);
+function describe(failed, findings, coverage) {
+  const also = coverage && `; ${coverage}`;
+  if (failed) return fit(`${blockingIn(findings).length} P0-P2 finding(s)${also}. See the ${heading} comment.`);
   const count = (level) => findings.filter((f) => f.severity === level).length;
-  return fit(`No P0-P2 findings (${count('p3')} P3, ${count('pre_existing')} pre-existing).`);
+  return fit(`No P0-P2 findings (${count('p3')} P3, ${count('pre_existing')} pre-existing${also}).`);
 }
+
+// How many reviews did not complete, without naming them, so the PR shows when
+// a verdict rests on fewer reviews than the workflow runs.
+const coverageOf = (missed, total) =>
+  missed.length > 0 ? `${missed.length} of ${total} reviews did not complete` : '';
 
 // Turns the reviewers' results and structured output, as
 // [{ name, result, output }], into one status and comment, the reasons, if
@@ -136,14 +144,15 @@ function verdict(reviewers, sha, url, candidates = []) {
   const blocking = reviews.flatMap((r) => r.findings).filter((f) => failing.has(severityOf(f)));
   const failed = blocking.length > 0;
   const shown = reviews.length === 1 ? shape(reviews[0]) : union(reviews);
-  const body = findingsBody({ shown, failed, notChecked: list([shown.notChecked]), short, url });
+  const coverage = coverageOf(missed, entries.length);
+  const body = findingsBody({ shown, failed, notChecked: list([shown.notChecked]), short, url, coverage });
   const decision = {
     reasons: list(reviews.map((r) => humanReasons(r))),
     reviewer: suggestedReviewer(reviews, candidates),
     by: joinNames(done.map((entry) => entry.name)),
     missed,
   };
-  const description = describe(failed, shown.findings);
+  const description = describe(failed, shown.findings, coverage);
   if (failed) {
     body.push(
       '',
