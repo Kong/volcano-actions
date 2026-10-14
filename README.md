@@ -216,6 +216,9 @@ or for other bots, pass inputs. Pass the same ones in both
 retarget reviews the PR again:
 
 ```yaml
+jobs:
+  claude-review:
+    # uses and permissions as above
     with:
       focus: |
         - Accessibility regressions in rendered components
@@ -234,6 +237,9 @@ step 1 and pass an Anthropic API key from a repository secret in both
 workflows instead:
 
 ```yaml
+jobs:
+  claude-review:
+    # uses and permissions as above
     secrets:
       anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -257,5 +263,5 @@ pins and schema together. The test suite checks the deployed severity vocabulary
 independently of the current action's unit tests. Before pushing, run:
 
 ```sh
-node --test .github/actions/claude-review/claude-review.test.cjs
+npm test
 ```
