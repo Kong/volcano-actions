@@ -160,7 +160,7 @@ test('Codex runs pinned and read-only, with no credential in its commands', () =
   // The canary runs under the same profile and filter as the review's commands.
   const canary = stepText(codex, "- name: Check that Codex's commands cannot read its environment");
   assert.ok(canary.includes(`CANARY_TOKEN=$canary bash -c "codex${filter.trimEnd()} \\\n`));
-  assert.match(canary, / sandbox -P ':read-only' -- sh -c '.*cat \/proc\/\[0-9\]\*\/environ'/u);
+  assert.match(canary, / sandbox -P ':read-only' -- sh -c '.*cat \/proc\/\[0-9\]\*\/environ'; exit \\\$\?"/u);
   assert.match(canary, /\*"\$canary"\*\) echo "::error::.*" && exit 1 ;;\n/u);
 });
 
