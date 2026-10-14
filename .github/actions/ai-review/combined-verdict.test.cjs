@@ -5,8 +5,7 @@ const test = require('node:test');
 const { marker, verdict } = require('./ai-review.cjs');
 const { sha, url, finding, routine, reviewJson } = require('./test-helpers.cjs');
 
-// The verdict from Claude's and Codex's results, given as [result, output],
-// with no merge, so the comment combines the reviews itself.
+// The verdict from Claude's and Codex's results, given as [result, output].
 const pair = (claude, codex, candidates = []) =>
   verdict(
     [
@@ -51,7 +50,7 @@ test('a P0-P2 finding from either review fails the verdict, counted once however
     [[finding('p3')], [finding('p0')], 1],
     [[finding('p2')], [finding('p2', { title: 'Unchecked error' })], 2],
     [[finding('p1')], [finding('p1', { title: ' nil MAP write ' })], 1],
-    // The same problem at different severities stays twice without a merge.
+    // Only exact repeats drop, so the same problem at two severities stays twice.
     [[finding('p1')], [finding('p2')], 2],
   ]) {
     const v = both({ findings: claude }, { findings: codex });
@@ -63,7 +62,7 @@ test('a P0-P2 finding from either review fails the verdict, counted once however
   }
 });
 
-test('either review can ask for a person, and their reasons and gaps merge without repeats', () => {
+test('either review can ask for a person, and their reasons and gaps combine without repeats', () => {
   const v = both(
     { human: asks(['Changes billing.', 'Adds a table.']), notChecked: ['A.', 'B.', 'C.'] },
     { human: asks(['Changes billing.', 'Drops a column.', 'D.', 'E.']), notChecked: ['C.', 'D.', 'E.', 'F.'] },

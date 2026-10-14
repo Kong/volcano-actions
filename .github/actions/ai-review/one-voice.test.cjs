@@ -4,7 +4,6 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, publish, override, gate } = require('./ai-review.cjs');
 const { finding, reviewJson, needsOf, clearAfter, client, context, core } = require('./test-helpers.cjs');
-const { anthropicKey, setKeys, mergedReview, fromAnthropic, fakeFetch } = require('./test-models.cjs');
 
 // Every reviewer and provider name the tests use. None may reach what the
 // review publishes, only the run log.
@@ -105,7 +104,6 @@ const runs = [
 
 test('nothing the review publishes names a reviewer, however many ran or completed', async (t) => {
   clearAfter(t, 'REVIEWS');
-  setKeys(t);
   for (const [why, reviewers, skipped, missed] of runs) {
     process.env.REVIEWS = needs(reviewers, skipped);
     const c = client();
@@ -123,18 +121,14 @@ test('nothing the review publishes names a reviewer, however many ran or complet
   }
 });
 
-test('nor does a merged review, an override, or a later human gate', async (t) => {
+test('nor does an override or a later human gate', async (t) => {
   clearAfter(t, 'REVIEWS');
-  setKeys(t, { anthropic: anthropicKey });
-  fakeFetch(t, fromAnthropic(mergedReview({ findings: [finding('p1'), finding('p3')], reasons: ['Is it safe?'] })));
   process.env.REVIEWS = needs([
     ['Claude', ...ok(blocking)],
     ['Codex', ...ok(clean)],
   ]);
   const c = client();
-  const k = core();
-  await publish({ github: c.github, context: context(), core: k });
-  assert.deepEqual(k.warnings, []);
+  await publish({ github: c.github, context: context(), core: core() });
   const [{ body }] = c.named('createComment');
   const later = client({
     comments: [{ id: 2, user: { login: 'github-actions[bot]' }, body }],

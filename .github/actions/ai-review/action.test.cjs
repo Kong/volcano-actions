@@ -3,7 +3,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const review = require('./ai-review.cjs');
-const { providers } = require('./merge.cjs');
 const { readRepo } = require('./test-helpers.cjs');
 
 const yml = () => readRepo('.github/actions/ai-review/action.yml');
@@ -50,18 +49,5 @@ test("the action's outputs are the script step's, under the same names", () => {
   assert.deepEqual(names, ['review', 'inputs', 'candidates', 'policy', 'schema', 'schema-without-max-length']);
   for (const name of names) {
     assert.ok(outputs.includes(`\n    value: \${{ steps.run.outputs.${name} }}\n`), name);
-  }
-});
-
-test('publish gets each merge key through env, from the input of that name', () => {
-  const text = yml();
-  const inputs = { AI_REVIEW_ANTHROPIC_API_KEY: 'anthropic-api-key', AI_REVIEW_OPENAI_API_KEY: 'openai-api-key' };
-  assert.deepEqual(
-    providers.map((p) => p.env),
-    Object.keys(inputs),
-  );
-  for (const [env, input] of Object.entries(inputs)) {
-    assert.match(text, new RegExp(`\\n {2}${input}:\\n {4}description: For publish, `, 'u'), input);
-    assert.ok(text.includes(`\n        ${env}: \${{ inputs.${input} }}\n`), env);
   }
 });

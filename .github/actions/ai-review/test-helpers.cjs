@@ -225,16 +225,13 @@ function core() {
   const failures = [];
   const warnings = [];
   const notices = [];
-  const secrets = [];
   const outputs = {};
   return {
     failures,
     warnings,
     notices,
-    secrets,
     outputs,
     setFailed: (message) => failures.push(message),
-    setSecret: (secret) => secrets.push(secret),
     notice: (message) => notices.push(message),
     warning: (message) => warnings.push(message),
     setOutput: (name, value) => {

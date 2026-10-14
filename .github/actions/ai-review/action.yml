@@ -17,12 +17,6 @@ inputs:
   human-review-paths:
     description: For publish, newline-separated globs of paths whose changes need a human review.
     default: ''
-  anthropic-api-key:
-    description: For publish, an Anthropic API key that merges two or more completed reviews into one. Tried first.
-    default: ''
-  openai-api-key:
-    description: For publish, an OpenAI API key that merges the reviews when the Anthropic merge is unavailable or fails.
-    default: ''
 
 outputs:
   review:
@@ -69,8 +63,6 @@ runs:
         FOCUS: ${{ inputs.focus }}
         REVIEWS: ${{ inputs.reviews }}
         HUMAN_REVIEW_PATHS: ${{ inputs.human-review-paths }}
-        AI_REVIEW_ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
-        AI_REVIEW_OPENAI_API_KEY: ${{ inputs.openai-api-key }}
       with:
         retries: 3
         script: |

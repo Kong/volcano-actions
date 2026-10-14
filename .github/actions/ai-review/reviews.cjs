@@ -119,12 +119,6 @@ const completed = (result, review) =>
 const parsed = (reviewers) =>
   reviewers.map(({ name, result, output }) => ({ name, result, review: parseReview(output) }));
 
-// The structured outputs of the reviews that completed, in reviewer order.
-const completedReviews = (reviewers) =>
-  parsed(reviewers)
-    .filter((entry) => completed(entry.result, entry.review))
-    .map((entry) => entry.review);
-
 module.exports = {
   cap,
   reviewersOf,
@@ -134,5 +128,4 @@ module.exports = {
   severityOf,
   parsed,
   completed,
-  completedReviews,
 };

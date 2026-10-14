@@ -17,8 +17,7 @@ const {
 } = require('./github.cjs');
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
-const { reviewersOf, completedReviews } = require('./reviews.cjs');
-const { mergeReviews } = require('./merge.cjs');
+const { reviewersOf } = require('./reviews.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
 // the same head. Without one, it still publishes, so a reopen finds a verdict.
@@ -113,9 +112,7 @@ async function publish({ github, context, core }) {
     return;
   }
   const { reviewers, candidates } = reviewersOf(process.env.REVIEWS);
-  // The merge never throws: without one, the comment combines the reviews itself.
-  const merged = await mergeReviews(completedReviews(reviewers), core);
-  const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates), merged);
+  const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
   // The status goes first so a failed comment cannot leave the head pending.
   await setStatus(github, context, pr.head.sha, result.state, result.description);
   reportIncomplete(core, pr.head.sha, result);

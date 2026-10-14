@@ -51,7 +51,7 @@ test('publish keeps the reviewers in order, without naming them', async (t) => {
   const c = client();
   await publish({ github: c.github, context: context(), core: core() });
   const [{ body }] = c.named('createComment');
-  // Without a merge, the first reviewer's summary stands for the review.
+  // The first reviewer's summary stands for the review.
   assert.match(body, /\n\nG\.\n\n\*\*⚪ P3\*\*\n- `internal\/a\.go:12` Nil map write\n/u);
   assert.match(body, /\*\*Not checked:\*\* The AI review read the diff/u);
   assert.doesNotMatch(body, /Gemini|Claude/u);

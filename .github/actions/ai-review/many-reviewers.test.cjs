@@ -58,7 +58,7 @@ test('a P0-P2 finding from any review fails the verdict, and every distinct find
   assert.equal(all.body.match(/\n- `internal\/a\.go:\d+` Nil map write/gu).length, 3);
 });
 
-test('any review can ask for a person, and reasons and gaps merge without repeats', () => {
+test('any review can ask for a person, and reasons and gaps combine without repeats', () => {
   const v = three([
     { human: asks(['A?', 'B?']), notChecked: ['X.'] },
     { human: routine, notChecked: ['X.', 'Y.'] },

@@ -11,21 +11,63 @@ const {
   code,
   joinNames,
 } = require('./constants.cjs');
-const { humanReasons, clearsCode, suggestedReviewer, severityOf, parsed, completed } = require('./reviews.cjs');
-const { shape, union } = require('./combine.cjs');
+const { cap, humanReasons, clearsCode, suggestedReviewer, severityOf, parsed, completed } = require('./reviews.cjs');
 
 const heading = 'AI review';
 const noneCompleted = 'No AI review completed.';
 // Says what the review could not verify, so a person checks only that. It
-// holds while the review jobs only read the checkout and leave inline
-// comments; the workflow tests pin each reviewer's tools.
+// holds while the review jobs only read the checkout; the workflow tests pin
+// each reviewer's tools.
 const readOnly =
   "**Not checked:** The AI review read the diff, the code, and the PR's text; it ran no tests or builds and read nothing outside this repository.";
 
-// Lists from several reviewers merge without repeats; one reviewer's stay as
-// it wrote them.
+// Lists from several reviewers combine without repeats; one reviewer's stay
+// as it wrote them.
 const listsFor = (count) =>
   count > 1 ? (lists) => [...new Set(lists.flat())].slice(0, 5) : (lists) => lists.flat().slice(0, 5);
+
+// A review's text at the schema's lengths, with its severities normalized.
+function shape(review) {
+  return {
+    summary: cap(review.summary, 1500),
+    findings: review.findings.map((f) => ({
+      severity: severityOf(f),
+      path: cap(String(f.path), 300),
+      line: f.line,
+      title: cap(String(f.title), 200),
+    })),
+    notChecked: (Array.isArray(review.not_checked) ? review.not_checked : [])
+      .filter((n) => typeof n === 'string' && n.trim())
+      .map((n) => cap(n.trim(), 200)),
+  };
+}
+
+const sameProblem = (f) =>
+  JSON.stringify([
+    f.severity,
+    f.path,
+    f.line,
+    f.title
+      .toLowerCase()
+      .replaceAll(/\s+/gu, ' ')
+      .replace(/[\s.!]+$/u, '')
+      .trim(),
+  ]);
+
+// Several reviews as one: every finding without exact repeats, the first
+// review's summary, and every gap.
+function union(reviews) {
+  const shaped = reviews.map((r) => shape(r));
+  const findings = new Map();
+  for (const f of shaped.flatMap((r) => r.findings)) {
+    if (!findings.has(sameProblem(f))) findings.set(sameProblem(f), f);
+  }
+  return {
+    summary: shaped[0].summary,
+    findings: [...findings.values()],
+    notChecked: shaped.flatMap((r) => r.notChecked),
+  };
+}
 
 // The summary must not keep showing an earlier head's verdict.
 function incompleteVerdict(short, url, candidates, missed) {
@@ -80,13 +122,10 @@ function describe(failed, findings) {
 // Turns the reviewers' results and structured output, as
 // [{ name, result, output }], into one status and comment, the reasons, if
 // any, that the head needs a person's review, and who to ask for it. The
-// comment shows one review: the only one that completed, `merged` (see
-// merge.cjs), or else every review's findings without repeats. The state, the
-// need for a person, and whether the code is cleared come from the reviews
-// themselves, so a merge can change how the review reads but never what it
-// decides. Reviewer names stay out of everything this returns but `by` and
-// `missed`, which only the run log shows.
-function verdict(reviewers, sha, url, candidates = [], merged = null) {
+// comment reads as one review, whichever and however many completed.
+// Reviewer names stay out of everything this returns but `by` and `missed`,
+// which only the run log shows.
+function verdict(reviewers, sha, url, candidates = []) {
   const short = sha.slice(0, 7);
   const entries = parsed(reviewers);
   const list = listsFor(entries.length);
@@ -96,11 +135,10 @@ function verdict(reviewers, sha, url, candidates = [], merged = null) {
   const reviews = done.map((entry) => entry.review);
   const blocking = reviews.flatMap((r) => r.findings).filter((f) => failing.has(severityOf(f)));
   const failed = blocking.length > 0;
-  const shown = reviews.length === 1 ? shape(reviews[0]) : (merged ?? union(reviews));
+  const shown = reviews.length === 1 ? shape(reviews[0]) : union(reviews);
   const body = findingsBody({ shown, failed, notChecked: list([shown.notChecked]), short, url });
-  const asked = list(reviews.map((r) => humanReasons(r)));
   const decision = {
-    reasons: asked.length > 0 && shown.reasons?.length > 0 ? shown.reasons : asked,
+    reasons: list(reviews.map((r) => humanReasons(r))),
     reviewer: suggestedReviewer(reviews, candidates),
     by: joinNames(done.map((entry) => entry.name)),
     missed,
