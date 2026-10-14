@@ -19,3 +19,14 @@ updates:
     groups:
       actions:
         group-by: dependency-name
+  # oxlint and oxfmt bumps can add findings, so each lands with its fixes.
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    labels: []
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    cooldown:
+      default-days: 5

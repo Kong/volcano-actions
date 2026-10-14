@@ -257,5 +257,5 @@ pins and schema together. The test suite checks the deployed severity vocabulary
 independently of the current action's unit tests. Before pushing, run:
 
 ```sh
-node --test .github/actions/claude-review/claude-review.test.cjs
+npm test
 ```
