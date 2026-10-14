@@ -1,0 +1,85 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings", "human_review", "not_checked", "reviewed_closely"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "maxLength": 1500,
+      "description": "One or two sentences on what the change does and its overall risk."
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "path", "line", "title"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["p0", "p1", "p2", "p3", "pre_existing"]
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Repository-relative file path."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Line in the head revision, or 0 for a file-level finding."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "One-line statement of the problem."
+          }
+        }
+      }
+    },
+    "human_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["needed", "reasons", "reviewer", "reviewer_reason"],
+      "properties": {
+        "needed": {
+          "type": "boolean",
+          "description": "Whether a person must judge the change before it merges."
+        },
+        "reasons": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "description": "The questions a person must answer to approve, one each, naming the file or behavior. Empty when not needed."
+        },
+        "reviewer": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "A login from reviewers.jsonl, or empty."
+        },
+        "reviewer_reason": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Why that reviewer fits, as a short phrase, or empty."
+        }
+      }
+    },
+    "not_checked": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "description": "What a person would still have to verify that this review could not, one sentence each. Empty when nothing."
+    },
+    "reviewed_closely": {
+      "type": "boolean",
+      "description": "False when the change is too large to review closely or hides content, so a person must read the code too."
+    }
+  }
+}
