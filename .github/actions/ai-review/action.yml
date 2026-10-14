@@ -1,0 +1,72 @@
+# Runs one step of the AI review for the ai-review workflows. The scripts,
+# policy, and schema ship with this action, so callers load them from this
+# repository rather than from the PR they review.
+name: AI review
+description: Prepares a reviewer's inputs, marks a head under review, publishes the combined verdict, applies an override, or re-sets the human review status.
+
+inputs:
+  step:
+    description: prepare, start, publish, override, or gate.
+    required: true
+  focus:
+    description: For prepare, extra review focus bullets appended to the policy's shared list.
+    default: ''
+  reviews:
+    description: For publish, the verdict job's `toJSON(needs)`. Every job with a `reviewer` output is a reviewer, and its `findings` output is its structured output.
+    default: ''
+  human-review-paths:
+    description: For publish, newline-separated globs of paths whose changes need a human review.
+    default: ''
+
+outputs:
+  review:
+    description: For start, 'true' when the head needs a review.
+    value: ${{ steps.run.outputs.review }}
+  inputs:
+    description: For prepare, the directory holding the reviewer's inputs.
+    value: ${{ steps.run.outputs.inputs }}
+  candidates:
+    description: For prepare, a JSON list of logins to suggest as the human reviewer, most history first.
+    value: ${{ steps.run.outputs.candidates }}
+  policy:
+    description: For prepare, the review policy prompt with this PR's values and the focus filled in.
+    value: ${{ steps.run.outputs.policy }}
+  schema:
+    description: For prepare, the JSON schema of a reviewer's structured output, on one line.
+    value: ${{ steps.run.outputs.schema }}
+  schema-without-max-length:
+    description: For prepare, the same schema without maxLength, for providers whose structured outputs reject it.
+    value: ${{ steps.run.outputs.schema-without-max-length }}
+
+runs:
+  using: composite
+  steps:
+    # Runs in the caller's base checkout at the workspace root, before any
+    # reviewer starts, and only reads the PR head.
+    - if: inputs.step == 'prepare'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        INPUTS: ${{ runner.temp }}/ai-review
+      run: bash "$GITHUB_ACTION_PATH/prepare.sh"
+    - id: run
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      # Inputs reach the script through env, never by interpolation into it.
+      env:
+        AI_REVIEW_SCRIPT: ${{ github.action_path }}/ai-review.cjs
+        AI_REVIEW_STEP: ${{ inputs.step }}
+        INPUTS: ${{ runner.temp }}/ai-review
+        FOCUS: ${{ inputs.focus }}
+        REVIEWS: ${{ inputs.reviews }}
+        HUMAN_REVIEW_PATHS: ${{ inputs.human-review-paths }}
+      with:
+        retries: 3
+        script: |
+          const review = require(process.env.AI_REVIEW_SCRIPT);
+          const step = process.env.AI_REVIEW_STEP;
+          if (!['prepare', 'start', 'publish', 'override', 'gate'].includes(step)) throw new Error(`Unknown AI review step: ${step}`);
+          await review[step]({ github, context, core });
