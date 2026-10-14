@@ -3,11 +3,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, humanStatusContext, marker, publish } = require('./ai-review.cjs');
-const { sha, url, finding, output, claudeReviews, clearAfter, client, context, core } = require('./test-helpers.cjs');
+const { sha, url, finding, output, claudeReviews, client, context, core } = require('./test-helpers.cjs');
 
 test('publish creates the summary comment once and then edits it', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = claudeReviews('success', output([finding('p1')]));
+  claudeReviews(t, 'success', output([finding('p1')]));
 
   const fresh = client({ comments: [{ id: 1, user: { login: 'someone' }, body: marker }] });
   await publish({ github: fresh.github, context: context(), core: core() });
@@ -26,8 +25,7 @@ test('publish creates the summary comment once and then edits it', async (t) => 
 });
 
 test('publish leaves the summary to the live head when this SHA is stale', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = claudeReviews('success', output([finding('p1')]));
+  claudeReviews(t, 'success', output([finding('p1')]));
   const c = client({
     liveHead: 'fedcba9876543210',
     comments: [{ id: 2, user: { login: 'github-actions[bot]' }, body: marker }],
@@ -45,8 +43,7 @@ test('publish leaves the summary to the live head when this SHA is stale', async
 });
 
 test('a closed PR publishes unless another open PR has its head', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = claudeReviews('success', output([finding('p1')]));
+  claudeReviews(t, 'success', output([finding('p1')]));
   const other = (number, state, head) => ({ number, state, head: { sha: head } });
 
   const taken = client({ state: 'closed', associated: [other(7, 'closed', sha), other(8, 'open', sha)] });
@@ -78,8 +75,7 @@ test('a closed PR publishes unless another open PR has its head', async (t) => {
 });
 
 test('publish sets the status even when the summary comment fails', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = claudeReviews('success', output([finding('p1')]));
+  claudeReviews(t, 'success', output([finding('p1')]));
   const c = client({ failComments: true });
   const k = core();
   await publish({ github: c.github, context: context(), core: k });
@@ -95,8 +91,7 @@ test('publish sets the status even when the summary comment fails', async (t) =>
 });
 
 test('publish reports an incomplete review as an error, says so in the summary, and fails the job', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = claudeReviews('failure');
+  claudeReviews(t, 'failure');
   const c = client({
     comments: [{ id: 2, user: { login: 'github-actions[bot]' }, body: `${marker}\n### AI review: no P0-P2 findings` }],
   });

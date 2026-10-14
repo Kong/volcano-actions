@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, publish } = require('./ai-review.cjs');
-const { sha, finding, reviewJson, needsOf, clearAfter, client, context, core } = require('./test-helpers.cjs');
+const { sha, finding, reviewJson, useReviews, client, context, core } = require('./test-helpers.cjs');
 
 const why = 'The first `Put` writes to a nil `seen` map and panics. Make the map in `New`.';
 const nilMap = finding('p1', { detail: why });
@@ -12,8 +12,8 @@ const fileLevel = finding('pre_existing', { line: 0, title: 'Old debt' });
 const opus = `**🟠 P1:** Nil map write\n\n${why}\n\n<sub>Found by claude-opus-5-5</sub>`;
 
 // Publishes these reviewers, as [name, result, findings, candidates, model].
-async function publishWith(reviewers, options = {}) {
-  process.env.REVIEWS = needsOf(...reviewers);
+async function publishWith(t, reviewers, options = {}) {
+  useReviews(t, ...reviewers);
   const c = client(options);
   const k = core();
   await publish({ github: c.github, context: context(), core: k });
@@ -22,8 +22,7 @@ async function publishWith(reviewers, options = {}) {
 }
 
 test("publish posts each completed review's findings on a line, signed by its model", async (t) => {
-  clearAfter(t, 'REVIEWS');
-  const { c, k, posted } = await publishWith([
+  const { c, k, posted } = await publishWith(t, [
     ['Claude', 'success', reviewJson({ findings: [nilMap, fileLevel, typo] }), '', 'claude-opus-5-5'],
     // Without a model, the reviewer's name signs its comments.
     ['Codex', 'success', reviewJson({ findings: [nilMap] })],
@@ -52,9 +51,8 @@ test("publish posts each completed review's findings on a line, signed by its mo
 });
 
 test('every level reads as the reviewers label it, and long text is capped', async (t) => {
-  clearAfter(t, 'REVIEWS');
   const levels = ['p0', 'p1', 'p2', 'p3', 'pre_existing'].map((s, i) => finding(s, { line: i + 1, title: 'x' }));
-  const { posted } = await publishWith([
+  const { posted } = await publishWith(t, [
     [
       'Claude',
       'success',
@@ -80,8 +78,8 @@ test('every level reads as the reviewers label it, and long text is capped', asy
 const bot = { login: 'github-actions[bot]' };
 
 test("publish skips a line where it already posted the model's finding at that level, whatever its wording", async (t) => {
-  clearAfter(t, 'REVIEWS');
   const { c, posted } = await publishWith(
+    t,
     [['Claude', 'success', reviewJson({ findings: [nilMap, nilMap, typo, fileLevel] }), '', 'claude-opus-5-5']],
     {
       reviewComments: [
@@ -111,7 +109,6 @@ test("publish skips a line where it already posted the model's finding at that l
 });
 
 test("a detail, or its absence, never changes which of the model's earlier comments covers a finding", async (t) => {
-  clearAfter(t, 'REVIEWS');
   const earlier = (detail) => ({
     user: bot,
     path: 'internal/a.go',
@@ -123,6 +120,7 @@ test("a detail, or its absence, never changes which of the model's earlier comme
     [nilMap, earlier('\n\nAn earlier detail.\n\nIn two paragraphs.')],
   ]) {
     const { posted } = await publishWith(
+      t,
       [['Claude', 'success', reviewJson({ findings: [now] }), '', 'claude-opus-5-5']],
       { reviewComments: [before] },
     );
@@ -131,9 +129,9 @@ test("a detail, or its absence, never changes which of the model's earlier comme
 });
 
 test('comments by anyone else, or at another level, never suppress a finding', async (t) => {
-  clearAfter(t, 'REVIEWS');
   const link = finding('p1', { path: 'docs/a.md', line: 3, title: 'Broken link' });
   const { posted } = await publishWith(
+    t,
     [['Claude', 'success', reviewJson({ findings: [nilMap, link] }), '', 'claude-opus-5-5']],
     {
       reviewComments: [
@@ -151,9 +149,8 @@ test('comments by anyone else, or at another level, never suppress a finding', a
 });
 
 test("a model's distinct findings on one line all post, and exact repeats post once", async (t) => {
-  clearAfter(t, 'REVIEWS');
   const unchecked = finding('p1', { title: 'Unchecked error' });
-  const { posted } = await publishWith([
+  const { posted } = await publishWith(t, [
     ['Claude', 'success', reviewJson({ findings: [nilMap, unchecked, nilMap] }), '', 'claude-opus-5-5'],
   ]);
   assert.deepEqual(posted, [
@@ -163,9 +160,8 @@ test("a model's distinct findings on one line all post, and exact repeats post o
 });
 
 test('a comment outside the diff is skipped with a notice, and other errors only warn', async (t) => {
-  clearAfter(t, 'REVIEWS');
   const reviewers = [['Claude', 'success', reviewJson({ findings: [nilMap, typo] }), '', 'claude-opus-5-5']];
-  const outside = await publishWith(reviewers, {
+  const outside = await publishWith(t, reviewers, {
     rejectComment: (args) => args.path === 'internal/a.go' && ['Validation Failed', 422],
   });
   assert.equal(outside.posted.length, 2);
@@ -173,13 +169,13 @@ test('a comment outside the diff is skipped with a notice, and other errors only
     outside.k.notices.filter((n) => n.startsWith('Skipped')),
     ['Skipped the comment on internal/a.go:12, which is outside the diff.'],
   );
-  const broken = await publishWith(reviewers, { rejectComment: () => ['Server Error', 500] });
+  const broken = await publishWith(t, reviewers, { rejectComment: () => ['Server Error', 500] });
   assert.equal(broken.posted.length, 2);
   assert.deepEqual(broken.k.warnings, [
     'Could not comment on internal/a.go:12: Server Error',
     'Could not comment on docs/a.md:3: Server Error',
   ]);
-  const unlisted = await publishWith(reviewers, { failReviewComments: true });
+  const unlisted = await publishWith(t, reviewers, { failReviewComments: true });
   assert.deepEqual(unlisted.posted, []);
   assert.match(unlisted.k.warnings[0], /^Could not read the PR's head or review comments, so none were posted/u);
   for (const { c, k } of [outside, broken, unlisted]) {
@@ -190,24 +186,22 @@ test('a comment outside the diff is skipped with a notice, and other errors only
 });
 
 test('nothing is posted without a completed finding on a line', async (t) => {
-  clearAfter(t, 'REVIEWS');
   for (const reviewers of [
     [['Claude', 'success', reviewJson({ findings: [fileLevel] }), '', 'claude-opus-5-5']],
     [['Claude', 'failure', reviewJson({ findings: [nilMap] }), '', 'claude-opus-5-5']],
     [['Claude', 'success', reviewJson({ findings: [nilMap, finding('nit')] }), '', 'claude-opus-5-5']],
     [['Claude', 'success', reviewJson({ findings: [finding('p1', { line: '12' })] })]],
   ]) {
-    const { c } = await publishWith(reviewers);
+    const { c } = await publishWith(t, reviewers);
     assert.deepEqual(c.named('listReviewComments'), [], JSON.stringify(reviewers));
     assert.deepEqual(c.named('createReviewComment'), [], JSON.stringify(reviewers));
   }
 });
 
 test("a finding's detail sits between its title and footer, cleaned and capped", async (t) => {
-  clearAfter(t, 'REVIEWS');
   const details = ['  Pings @kong/docs.\n', 'd'.repeat(1501), '🔥'.repeat(1500)];
   const findings = details.map((detail, i) => finding('p3', { line: i + 1, detail }));
-  const { c, posted } = await publishWith([['Claude', 'success', reviewJson({ findings }), '', 'm']]);
+  const { c, posted } = await publishWith(t, [['Claude', 'success', reviewJson({ findings }), '', 'm']]);
   assert.deepEqual(
     posted.map(([, , body]) => body.split('\n\n')),
     ['Pings @\u200Bkong/docs.', `${'d'.repeat(1499)}…`, '🔥'.repeat(1500)].map((d) => [
@@ -221,9 +215,8 @@ test("a finding's detail sits between its title and footer, cleaned and capped",
 });
 
 test('a finding without a detail completes, and its comment has only the title and footer', async (t) => {
-  clearAfter(t, 'REVIEWS');
   const findings = [undefined, '', ' \n ', 42, null].map((detail, i) => finding('p1', { line: i + 1, detail }));
-  const { c, k, posted } = await publishWith([['Claude', 'success', reviewJson({ findings }), '', 'm']]);
+  const { c, k, posted } = await publishWith(t, [['Claude', 'success', reviewJson({ findings }), '', 'm']]);
   assert.deepEqual(
     posted.map(([, line, body]) => [line, body]),
     [1, 2, 3, 4, 5].map((line) => [line, '**🟠 P1:** Nil map write\n\n<sub>Found by m</sub>']),
@@ -233,9 +226,8 @@ test('a finding without a detail completes, and its comment has only the title a
 });
 
 test('a head the PR has moved past gets no inline comments', async (t) => {
-  clearAfter(t, 'REVIEWS');
   const reviewers = [['Claude', 'success', reviewJson({ findings: [nilMap] }), '', 'claude-opus-5-5']];
-  const { c, k } = await publishWith(reviewers, { liveHead: 'fedcba9876543210' });
+  const { c, k } = await publishWith(t, reviewers, { liveHead: 'fedcba9876543210' });
   assert.deepEqual([c.named('listReviewComments'), c.named('createReviewComment')], [[], []]);
   assert.ok(k.notices.includes('Skipped the inline comments on abcdef1, which is no longer the PR head.'));
   // The reviewed head still gets its verdict.

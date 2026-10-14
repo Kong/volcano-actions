@@ -3,18 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, humanLabel, publish, override, gate } = require('./ai-review.cjs');
-const {
-  sha,
-  output,
-  routine,
-  review,
-  decided,
-  claudeReviews,
-  clearAfter,
-  client,
-  context,
-  core,
-} = require('./test-helpers.cjs');
+const { sha, output, routine, review, decided, claudeReviews, client, context, core } = require('./test-helpers.cjs');
 
 const needed = {
   needed: true,
@@ -26,8 +15,8 @@ const needed = {
 const candidates = JSON.stringify(['alice', 'bob', 'not a login', 7]);
 
 // Publishes a clean review with this human decision; returns whom it asked.
-async function publishAsking(human, options = {}, found = candidates) {
-  process.env.REVIEWS = claudeReviews('success', output([], 'Adds a cache.', human), found);
+async function publishAsking(t, human, options = {}, found = candidates) {
+  claudeReviews(t, 'success', output([], 'Adds a cache.', human), found);
   const c = client(options);
   const k = core();
   await publish({ github: c.github, context: context(), core: k });
@@ -40,8 +29,7 @@ async function publishAsking(human, options = {}, found = candidates) {
 }
 
 test('publish asks the suggested reviewer when the head waits on its first human review', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  const asked = await publishAsking(needed);
+  const asked = await publishAsking(t, needed);
   assert.deepEqual(asked.requested, [[7, ['bob']]]);
   assert.match(
     asked.body,
@@ -49,7 +37,7 @@ test('publish asks the suggested reviewer when the head waits on its first human
   );
 
   // A team request, as CODEOWNERS makes, still gets a person by name.
-  assert.deepEqual((await publishAsking(needed, { requestedTeams: [{ slug: 'team-volcano' }] })).requested, [
+  assert.deepEqual((await publishAsking(t, needed, { requestedTeams: [{ slug: 'team-volcano' }] })).requested, [
     [7, ['bob']],
   ]);
   for (const options of [
@@ -61,33 +49,32 @@ test('publish asks the suggested reviewer when the head waits on its first human
     { state: 'closed' },
     { liveHead: 'fedcba9876543210' },
   ]) {
-    assert.deepEqual((await publishAsking(needed, options)).requested, [], JSON.stringify(options));
+    assert.deepEqual((await publishAsking(t, needed, options)).requested, [], JSON.stringify(options));
   }
   // A bot's review does not count as a person's.
-  assert.deepEqual((await publishAsking(needed, { reviews: [review('copilot', 'COMMENTED', 'Bot')] })).requested, [
+  assert.deepEqual((await publishAsking(t, needed, { reviews: [review('copilot', 'COMMENTED', 'Bot')] })).requested, [
     [7, ['bob']],
   ]);
 });
 
 test('publish asks no one without a need or candidates, and a failed request only warns', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  const quiet = await publishAsking({ ...routine, reviewer: 'bob', reviewer_reason: 'wrote internal/billing' });
+  const quiet = await publishAsking(t, { ...routine, reviewer: 'bob', reviewer_reason: 'wrote internal/billing' });
   assert.deepEqual(quiet.requested, []);
   assert.doesNotMatch(quiet.body, /Suggested reviewer/u);
 
-  const failed = await publishAsking(needed, { failRequest: true });
+  const failed = await publishAsking(t, needed, { failRequest: true });
   assert.equal(failed.warnings.length, 1);
   assert.match(failed.warnings[0], /Could not request a review from bob/u);
 
-  const nobody = await publishAsking(needed, {}, '');
+  const nobody = await publishAsking(t, needed, {}, '');
   assert.deepEqual(nobody.requested, []);
   assert.match(nobody.body, /\n\nAny collaborator with write access other than the author can approve\.\n/u);
 });
 
 test('later events ask the reviewer the review suggested', async (t) => {
-  clearAfter(t, 'REVIEWS');
   // The suggestion survives in the comment even when no person was needed yet.
-  process.env.REVIEWS = claudeReviews(
+  claudeReviews(
+    t,
     'success',
     output([], 'Adds a cache.', { ...routine, reviewer: 'bob', reviewer_reason: 'wrote internal/billing' }),
     '["alice","bob"]',

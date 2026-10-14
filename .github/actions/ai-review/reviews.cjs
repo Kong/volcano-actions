@@ -2,6 +2,8 @@
 
 // Reads each reviewer's structured output, which schema.json describes.
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { severities } = require('./constants.cjs');
 
 // Caps untrusted text at `max` characters, counted as JSON Schema's maxLength
@@ -12,14 +14,30 @@ function cap(text, max) {
   return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`;
 }
 
-// The verdict job's `needs`, as `toJSON(needs)` renders it. The verdict job
-// needs only reviewer jobs, so every entry is a reviewer, in the order the
-// object lists them. Each is named by its `reviewer` output, or by its job ID
-// when it set no outputs, as when it was skipped, so a reviewer that did not
-// run is still reported as incomplete. Its `model` output names the model
-// that reviewed, if any. Reviewer candidates come from the first one that
-// reports them; every reviewer job finds them from the same base history.
-function reviewersOf(raw) {
+// A reviewer job's structured output, `ai-review-<job ID>.json` in `dir`,
+// where the verdict job downloads the job's artifact of that name. It travels
+// as a file because an environment variable holds at most 128 KiB, and a
+// provider without maxLength can write more. A missing or unreadable file
+// reads as no output, so that review did not complete; `unread` says why.
+function outputOf(dir, id) {
+  const name = `ai-review-${id}.json`;
+  if (!dir) return { output: '', unread: `no directory holds ${name}` };
+  try {
+    return { output: fs.readFileSync(path.join(dir, name), 'utf8') };
+  } catch (error) {
+    return { output: '', unread: error.message };
+  }
+}
+
+// The verdict job's `needs`, as `toJSON(needs)` renders it, with each job's
+// structured output from `dir`. The verdict job needs only reviewer jobs, so
+// every entry is a reviewer, in the order the object lists them. Each is named
+// by its `reviewer` output, or by its job ID when it set no outputs, as when
+// it was skipped, so a reviewer that did not run is still reported as
+// incomplete. Its `model` output names the model that reviewed, if any.
+// Reviewer candidates come from the first one that reports them; every
+// reviewer job finds them from the same base history.
+function reviewersOf(raw, dir) {
   let needs;
   try {
     needs = JSON.parse(raw || '{}');
@@ -34,7 +52,7 @@ function reviewersOf(raw) {
       name: text(job.outputs?.reviewer) || `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
       model: text(job.outputs?.model),
       result: job.result,
-      output: job.outputs?.findings ?? '',
+      ...outputOf(dir, id),
     })),
     candidates: jobs.find(([, job]) => job.outputs?.candidates)?.[1].outputs.candidates ?? '',
   };

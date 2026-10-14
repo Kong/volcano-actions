@@ -17,8 +17,8 @@ const {
 } = require('./test-helpers.cjs');
 
 // Publishes a clean review with this human decision.
-async function publishHuman(human, options = {}) {
-  process.env.REVIEWS = claudeReviews('success', output([], 'Adds a cache.', human));
+async function publishHuman(t, human, options = {}) {
+  claudeReviews(t, 'success', output([], 'Adds a cache.', human));
   const c = client(options);
   const k = core();
   await publish({ github: c.github, context: context(), core: k });
@@ -27,30 +27,28 @@ async function publishHuman(human, options = {}) {
 }
 
 test('publish passes the human status only when nothing calls for a person', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  const quiet = await publishHuman(routine);
+  const quiet = await publishHuman(t, routine);
   assert.deepEqual(quiet.human, [[sha, 'success', 'No human review needed.']]);
   assert.match(quiet.body, /\n\n\*\*Human review:\*\* not needed\n\n<!-- ai-review-human [A-Za-z0-9+/=]+ -->$/u);
 
-  const billing = await publishHuman({ needed: true, reasons: ['Changes how @kong/billing rounds invoices.'] });
+  const billing = await publishHuman(t, { needed: true, reasons: ['Changes how @kong/billing rounds invoices.'] });
   assert.deepEqual(billing.human, [[sha, 'pending', 'Needs human review: Changes how @kong/billing rounds invoices.']]);
   assert.match(billing.body, /\*\*Human review:\*\* needed\n- Changes how @​kong\/billing rounds invoices\.\n/u);
 
   // The label asks live, so the comment does not record it.
-  const labeled = await publishHuman(routine, { labels: [{ name: humanLabel }] });
+  const labeled = await publishHuman(t, routine, { labels: [{ name: humanLabel }] });
   assert.deepEqual(labeled.human, [[sha, 'pending', `Needs human review: The ${humanLabel} label asks for one.`]]);
   assert.match(labeled.body, /\*\*Human review:\*\* not needed/u);
 
-  const long = await publishHuman({ needed: true, reasons: ['x'.repeat(300)] });
+  const long = await publishHuman(t, { needed: true, reasons: ['x'.repeat(300)] });
   assert.equal(long.human[0][2].length, 140);
   assert.ok(long.human[0][2].endsWith('…'));
 });
 
 test('CI and reviewer instruction files need no person by themselves', async (t) => {
-  clearAfter(t, 'REVIEWS');
   // No kind of file needs a person by itself; reviewers judge CI and reviewer
   // instructions like any other change, and nothing lists the files.
-  const ci = await publishHuman(routine, {
+  const ci = await publishHuman(t, routine, {
     files: [{ filename: '.github/workflows/ci.yml' }, { filename: 'api/AGENTS.md' }, { filename: 'CODEOWNERS' }],
     failFiles: true,
   });
@@ -58,11 +56,11 @@ test('CI and reviewer instruction files need no person by themselves', async (t)
 });
 
 test("a repository's reserved paths need a person", async (t) => {
-  clearAfter(t, 'REVIEWS', 'HUMAN_REVIEW_PATHS');
+  clearAfter(t, 'HUMAN_REVIEW_PATHS');
   // A repository's own paths decide without the reviewers, at a file's old or
   // new path.
   process.env.HUMAN_REVIEW_PATHS = '# Schema changes\n  **/migrations/**  \n\ninfra/*.tf\n';
-  const moved = await publishHuman(routine, {
+  const moved = await publishHuman(t, routine, {
     files: [{ filename: 'db/old/1.sql', previous_filename: 'db/migrations/1.sql' }],
   });
   assert.deepEqual(moved.human, [
@@ -72,7 +70,7 @@ test("a repository's reserved paths need a person", async (t) => {
       'Needs human review: Changes a path this repository reserves for human review: db/migrations/1.sql.',
     ],
   ]);
-  const many = await publishHuman(routine, {
+  const many = await publishHuman(t, routine, {
     files: [{ filename: 'infra/a.tf' }, { filename: 'main.go' }, { filename: 'infra/b.tf' }],
   });
   assert.deepEqual(many.human, [
@@ -82,17 +80,17 @@ test("a repository's reserved paths need a person", async (t) => {
       'Needs human review: Changes a path this repository reserves for human review: infra/a.tf (+1 more).',
     ],
   ]);
-  const elsewhere = await publishHuman(routine, {
+  const elsewhere = await publishHuman(t, routine, {
     files: [{ filename: '.github/workflows/ci.yml' }, { filename: 'infra/prod/main.tf' }],
   });
   assert.deepEqual(elsewhere.human, [[sha, 'success', 'No human review needed.']]);
-  const capped = await publishHuman(routine, {
+  const capped = await publishHuman(t, routine, {
     files: Array.from({ length: 3000 }, (_, i) => ({ filename: `src/${i}.go` })),
   });
   assert.deepEqual(capped.human, [
     [sha, 'pending', 'Needs human review: Changes more files than GitHub lists, so not every path could be checked.'],
   ]);
-  const unlisted = await publishHuman(routine, { failFiles: true });
+  const unlisted = await publishHuman(t, routine, { failFiles: true });
   assert.deepEqual(unlisted.human, [
     [
       sha,
@@ -103,8 +101,7 @@ test("a repository's reserved paths need a person", async (t) => {
 });
 
 test('publish records an incomplete review as needing a person', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  process.env.REVIEWS = claudeReviews('failure');
+  claudeReviews(t, 'failure');
   const c = client();
   await publish({ github: c.github, context: context(), core: core() });
   assert.deepEqual(c.set(humanStatusContext), [[sha, 'pending', 'Needs human review: No AI review completed.']]);
@@ -113,7 +110,6 @@ test('publish records an incomplete review as needing a person', async (t) => {
 });
 
 test('a writer other than the author approves, and a change request holds the head', async (t) => {
-  clearAfter(t, 'REVIEWS');
   const needed = { needed: true, reasons: ['Changes billing.'] };
   const waiting = 'Needs human review: Changes billing.';
   for (const [human, options, want] of [
@@ -147,7 +143,7 @@ test('a writer other than the author approves, and a change request holds the he
       ['pending', 'Changes requested by b.'],
     ],
   ]) {
-    process.env.REVIEWS = claudeReviews('success', output([], 'Adds a cache.', human));
+    claudeReviews(t, 'success', output([], 'Adds a cache.', human));
     const c = client(options);
     await publish({ github: c.github, context: context(), core: core() });
     assert.deepEqual(c.set(humanStatusContext), [[sha, ...want]], JSON.stringify(options.reviews));
@@ -158,8 +154,9 @@ const question = { needed: true, reasons: ['Should the task role write every que
 const ask = 'Decide the points above: approve to accept them, or request changes.';
 
 // Publishes a review that asks a person this question; returns the summary.
-async function publishQuestion({ findings = [finding('p3')], human = question, closely = true, options = {} } = {}) {
-  process.env.REVIEWS = claudeReviews(
+async function publishQuestion(t, { findings = [finding('p3')], human = question, closely = true, options = {} } = {}) {
+  claudeReviews(
+    t,
     'success',
     JSON.stringify({
       summary: 'Adds a cache.',
@@ -180,19 +177,18 @@ const marked = (body) =>
     .cleared;
 
 test('a person is asked to decide the reasons, not to review the code again', async (t) => {
-  clearAfter(t, 'REVIEWS');
-  const cleared = await publishQuestion();
+  const cleared = await publishQuestion(t);
   assert.ok(
     cleared.includes(
       `\n- Should the task role write every queue?\n\nThe AI review found no P0-P2 problems at abcdef1, so the code needs no second review for bugs. ${ask}\n\n`,
     ),
   );
   assert.equal(marked(cleared), true);
-  assert.doesNotMatch(await publishQuestion({ human: routine }), /Decide the points/u);
+  assert.doesNotMatch(await publishQuestion(t, { human: routine }), /Decide the points/u);
 });
 
 test('nothing says the code is done when the review cannot vouch for it', async (t) => {
-  clearAfter(t, 'REVIEWS', 'HUMAN_REVIEW_PATHS');
+  clearAfter(t, 'HUMAN_REVIEW_PATHS');
   // Nothing says the code is done when findings block, when the review could
   // not read it closely or did not say, when it gave no reason of its own, or
   // when the path is reserved for a person.
@@ -205,13 +201,13 @@ test('nothing says the code is done when the review cannot vouch for it', async 
     ['labeled for a person', { options: { labels: [{ name: humanLabel }] } }],
     ['live reasons unread', { options: { failStatuses: true } }],
   ]) {
-    const body = await publishQuestion(args);
+    const body = await publishQuestion(t, args);
     assert.match(body, new RegExp(`\\n\\n${ask}\\n\\n`, 'u'), why);
     assert.doesNotMatch(body, /no second review/u, why);
     assert.equal(marked(body), false, why);
   }
   process.env.HUMAN_REVIEW_PATHS = '**/migrations/**';
-  const reserved = await publishQuestion({ options: { files: [{ filename: 'db/migrations/1.sql' }] } });
+  const reserved = await publishQuestion(t, { options: { files: [{ filename: 'db/migrations/1.sql' }] } });
   assert.match(reserved, /- Changes a path this repository reserves for human review: db\/migrations\/1\.sql\.\n/u);
   assert.doesNotMatch(reserved, /no second review/u);
 });

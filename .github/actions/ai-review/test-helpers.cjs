@@ -5,6 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { marker } = require('./ai-review.cjs');
+const { tempDir } = require('./test-git.cjs');
 
 const root = path.join(__dirname, '../../..');
 const readRepo = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -30,19 +31,38 @@ const reviewJson = ({
   closely = true,
 } = {}) =>
   JSON.stringify({ summary, findings, human_review: human, not_checked: notChecked, reviewed_closely: closely });
+
+// Deletes the named action inputs after the test that sets them.
+const clearAfter = (t, ...names) =>
+  t.after(() => {
+    for (const name of names) delete process.env[name];
+  });
+
 // The verdict job's `toJSON(needs)` for reviewers given as
-// [name, result, findings, candidates, model], each in a job of its own.
+// [name, result, output, candidates, model], each in a job of its own.
 const needsOf = (...reviewers) =>
   JSON.stringify(
     Object.fromEntries(
-      reviewers.map(([name, result, findings = '', candidates = '', model = ''], i) => [
+      reviewers.map(([name, result, , candidates = '', model = ''], i) => [
         `job${i}`,
-        { result, outputs: { reviewer: name, model, findings, candidates } },
+        { result, outputs: { reviewer: name, model, candidates } },
       ]),
     ),
   );
+// Hands publish these reviewers as the verdict job does: their `needs` in
+// REVIEWS, and each structured output as its job's file in REVIEW_OUTPUTS.
+// An empty output writes no file.
+function useReviews(t, ...reviewers) {
+  const dir = tempDir(t, 'ai-review-outputs-');
+  reviewers.forEach(([, , json], i) => {
+    if (json) fs.writeFileSync(path.join(dir, `ai-review-job${i}.json`), json);
+  });
+  process.env.REVIEWS = needsOf(...reviewers);
+  process.env.REVIEW_OUTPUTS = dir;
+  clearAfter(t, 'REVIEWS', 'REVIEW_OUTPUTS');
+}
 // The same with Claude as the only reviewer.
-const claudeReviews = (result, findings, candidates) => needsOf(['Claude', result, findings, candidates]);
+const claudeReviews = (t, result, json, candidates) => useReviews(t, ['Claude', result, json, candidates]);
 const review = (login, state, type = 'User', commit = sha) => ({ user: { login, type }, state, commit_id: commit });
 // The summary comment as publish leaves it for a head it decided.
 const decided = (reasons, head = sha, reviewer = null) => ({
@@ -50,12 +70,6 @@ const decided = (reasons, head = sha, reviewer = null) => ({
   user: { login: 'github-actions[bot]' },
   body: `${marker}\n### AI review: no P0-P2 findings\n\n<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha: head, reasons, reviewer })).toString('base64')} -->`,
 });
-
-// Deletes the named action inputs after the test that sets them.
-const clearAfter = (t, ...names) =>
-  t.after(() => {
-    for (const name of names) delete process.env[name];
-  });
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
@@ -264,6 +278,7 @@ module.exports = {
   routine,
   reviewJson,
   needsOf,
+  useReviews,
   claudeReviews,
   review,
   decided,
