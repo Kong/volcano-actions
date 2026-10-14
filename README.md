@@ -216,13 +216,16 @@ or for other bots, pass inputs. Pass the same ones in both
 retarget reviews the PR again:
 
 ```yaml
-with:
-  focus: |
-    - Accessibility regressions in rendered components
-  human_review_paths: |
-    **/migrations/**
-    infra/prod/**
-  allowed_bots: dependabot[bot],renovate[bot]
+jobs:
+  claude-review:
+    # uses and permissions as above
+    with:
+      focus: |
+        - Accessibility regressions in rendered components
+      human_review_paths: |
+        **/migrations/**
+        infra/prod/**
+      allowed_bots: dependabot[bot],renovate[bot]
 ```
 
 `human_review_paths` takes one glob per line, matched against paths from the
@@ -234,8 +237,11 @@ step 1 and pass an Anthropic API key from a repository secret in both
 workflows instead:
 
 ```yaml
-secrets:
-  anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+jobs:
+  claude-review:
+    # uses and permissions as above
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 The review then authenticates with the key instead of the federation.
