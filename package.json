@@ -1,0 +1,14 @@
+{
+  "name": "volcano-actions",
+  "private": true,
+  "scripts": {
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "test": "node --test '.github/actions/claude-review/*.test.cjs'"
+  },
+  "devDependencies": {
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0"
+  }
+}

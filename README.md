@@ -216,13 +216,13 @@ or for other bots, pass inputs. Pass the same ones in both
 retarget reviews the PR again:
 
 ```yaml
-    with:
-      focus: |
-        - Accessibility regressions in rendered components
-      human_review_paths: |
-        **/migrations/**
-        infra/prod/**
-      allowed_bots: dependabot[bot],renovate[bot]
+with:
+  focus: |
+    - Accessibility regressions in rendered components
+  human_review_paths: |
+    **/migrations/**
+    infra/prod/**
+  allowed_bots: dependabot[bot],renovate[bot]
 ```
 
 `human_review_paths` takes one glob per line, matched against paths from the

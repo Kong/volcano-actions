@@ -4,16 +4,16 @@ version: 2
 updates:
   # One PR per action across all directories, so every reference moves to the
   # same pinned commit.
-  - package-ecosystem: "github-actions"
+  - package-ecosystem: 'github-actions'
     directories:
-      - "/"
-      - "/.github/actions/*"
+      - '/'
+      - '/.github/actions/*'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
     labels: []
     commit-message:
-      prefix: "chore"
-      include: "scope"
+      prefix: 'chore'
+      include: 'scope'
     cooldown:
       default-days: 5
     groups:
