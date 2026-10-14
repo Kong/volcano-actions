@@ -116,14 +116,15 @@ const inlineComments = (reviewers) =>
     );
 
 // Posts the inline comments on the reviewed head. Reviewers may comment on the
-// same problem; only a comment whose exact body already sits at its line is
-// skipped, so reruns and later pushes do not repeat it. Comments sit beside
-// the verdict, so no failure here fails the job.
+// same problem. Each model comments once per line: its wording varies between
+// runs, so a later push skips a line where the same model already commented.
+// Comments sit beside the verdict, so no failure here fails the job.
 async function postFindings({ github, context, core }, reviewers) {
   const pr = context.payload.pull_request;
   const comments = inlineComments(reviewers);
   if (comments.length === 0) return;
-  const at = (c) => JSON.stringify([c.path, c.line, c.body]);
+  const signature = (body) => String(body).slice(String(body).lastIndexOf('\n') + 1);
+  const at = (c) => JSON.stringify([c.path, c.line, signature(c.body)]);
   let posted;
   try {
     const existing = await github.paginate(github.rest.pulls.listReviewComments, {

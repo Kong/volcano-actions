@@ -73,14 +73,19 @@ test('every level reads as the reviewers label it, and long text is capped', asy
   assert.ok(posted[0][2].endsWith(`<sub>Found by ${'m'.repeat(99)}…</sub>`));
 });
 
-test('publish skips a comment whose exact body already sits at its line', async (t) => {
+test('publish skips a line where the same model already commented, whatever its wording', async (t) => {
   clearAfter(t, 'REVIEWS');
   const { c, posted } = await publishWith(
     [['Claude', 'success', reviewJson({ findings: [nilMap, nilMap, typo, fileLevel] }), '', 'claude-opus-5-5']],
     {
       reviewComments: [
-        { path: 'internal/a.go', line: 12, body: opus },
-        // Only the exact body at the same line counts.
+        // The same model at the same line, worded differently on an earlier run.
+        {
+          path: 'internal/a.go',
+          line: 12,
+          body: '**🟠 P1:** A nil map write panics\n\n<sub>Found by claude-opus-5-5</sub>',
+        },
+        // The same model at another line, and another model at the same line.
         { path: 'docs/a.md', line: 4, body: '**⚪ P3:** Typo @​kong/docs\n\n<sub>Found by claude-opus-5-5</sub>' },
         { path: 'docs/a.md', line: 3, body: '**⚪ P3:** Typo\n\n<sub>Found by gpt-6.1-sol</sub>' },
       ],
