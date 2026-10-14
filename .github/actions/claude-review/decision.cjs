@@ -12,9 +12,10 @@ const decisionMarker = (sha, { reasons, reviewer, cleared = false }) =>
   `<!-- claude-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared })).toString('base64')} -->`;
 
 // The person is asked to decide the reasons, not to repeat the review. When
-// the code is cleared (see publish), the comment says so.
+// the code is cleared (see publish), the comment says so, naming the reviews
+// that cleared it.
 function humanSection(sha, decision) {
-  const { reasons, reviewer, cleared } = decision;
+  const { reasons, reviewer, cleared, by = 'Claude' } = decision;
   const lines =
     reasons.length > 0
       ? ['**Human review:** needed', ...reasons.map((r) => `- ${clean(r)}`)]
@@ -24,7 +25,7 @@ function humanSection(sha, decision) {
     lines.push(
       '',
       cleared
-        ? `Claude found no P0-P2 problems at ${sha.slice(0, 7)}, so the code needs no second review for bugs. ${ask}`
+        ? `${by} found no P0-P2 problems at ${sha.slice(0, 7)}, so the code needs no second review for bugs. ${ask}`
         : ask,
       '',
       `${reviewer ? `Suggested reviewer: ${code(reviewer.login)} (${clean(reviewer.why)}). ` : ''}Any collaborator with write access other than the author can approve.`,

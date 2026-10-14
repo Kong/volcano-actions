@@ -91,7 +91,21 @@ async function publishSummary({ github, context, core }, result, decision) {
   }
 }
 
-// Publishes the review job's verdict: the commit statuses for the reviewed
+// Fails the job only when no review completed. One that did not complete
+// leaves the verdict to the other, which the run shows as a warning.
+function reportIncomplete(core, sha, result) {
+  if (result.state === 'error') {
+    const what =
+      result.missed.length > 1 ? 'Neither the Claude nor the Codex review produced' : 'Claude review did not produce';
+    core.setFailed(`${what} a verdict for ${sha}.`);
+    return;
+  }
+  for (const name of result.missed) {
+    core.warning(`The ${name} review of ${sha.slice(0, 7)} did not complete, so the verdict is ${result.by}'s alone.`);
+  }
+}
+
+// Publishes the review jobs' verdict: the commit statuses for the reviewed
 // head, then the summary comment.
 async function publish({ github, context, core }) {
   const pr = context.payload.pull_request;
@@ -103,14 +117,16 @@ async function publish({ github, context, core }) {
     return;
   }
   const findings = process.env.FINDINGS || '';
-  const result = verdict(process.env.REVIEW_RESULT, findings, pr.head.sha, runUrl(context), reviewerCandidates());
+  const codex = { result: process.env.CODEX_RESULT || '', output: process.env.CODEX_FINDINGS || '' };
+  const url = runUrl(context);
+  const result = verdict(process.env.REVIEW_RESULT, findings, pr.head.sha, url, reviewerCandidates(), codex);
   // The status goes first so a failed comment cannot leave the head pending.
   await setStatus(github, context, pr.head.sha, result.state, result.description);
-  if (result.state === 'error') core.setFailed(`Claude review did not produce a verdict for ${pr.head.sha}.`);
+  reportIncomplete(core, pr.head.sha, result);
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
   const paths = await pathReasons(github, context, pr.number);
-  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer };
+  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer, by: result.by };
   let live = null;
   try {
     live = await liveReasons(github, context, pull, pr.head.sha);
@@ -120,7 +136,7 @@ async function publish({ github, context, core }) {
     core.setFailed(`The verdict is published, but the human review status failed: ${error.message}`);
   }
   // A reserved path or the needs-human-review label asks a person whatever
-  // Claude decides, so neither is Claude's to clear; unread labels fail closed.
+  // the reviews decide, so neither is theirs to clear; unread labels fail closed.
   decision.cleared = Boolean(result.cleared) && paths.length === 0 && live?.length === 0;
   await publishSummary({ github, context, core }, result, decision);
 }
