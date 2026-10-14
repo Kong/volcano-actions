@@ -18,3 +18,6 @@ jobs:
       id-token: write
       pull-requests: write
       statuses: write
+    # This repository is not in the team-volcano federation.
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
