@@ -2,7 +2,7 @@
 # Writes a reviewer's inputs to $INPUTS from the base checkout at the workspace
 # root. The PR head is only data there, in a separate worktree, never executed.
 # action.yml runs this for `step: prepare` and passes REPO, PR_NUMBER,
-# BASE_SHA, HEAD_SHA, INPUTS, and GH_TOKEN through env.
+# PR_AUTHOR, BASE_SHA, HEAD_SHA, INPUTS, and GH_TOKEN through env.
 set -euo pipefail
 mkdir -p "$INPUTS"
 # The head is not on a fetched branch once the PR has moved past it.
@@ -31,8 +31,14 @@ git diff --numstat -z --no-renames "$BASE_SHA...$HEAD_SHA" | while IFS= read -r 
 done
 git log --format='%h %s%n%n%b' "$BASE_SHA..$HEAD_SHA" > "$INPUTS/commits.txt"
 gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '"# " + .title + "\n\n" + (.body // "")' > "$INPUTS/description.md"
-gh api "repos/$REPO/pulls/$PR_NUMBER/comments" --paginate \
-  --jq '.[] | {id, in_reply_to_id, path, line, original_line, author: .user.login, created_at, updated_at, body}' > "$INPUTS/review-comments.jsonl"
+# Review comments by the author, this review's own inline findings, and the
+# repository's owners, members, and collaborators, as for comments.jsonl.
+gh api "repos/$REPO/pulls/$PR_NUMBER/comments" --paginate |
+  jq -c --arg author "$PR_AUTHOR" '.[]
+    | select(.user.login == $author or .user.login == "github-actions[bot]"
+        or (.user.type != "Bot" and (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))))
+    | {id, in_reply_to_id, path, line, original_line, author: .user.login, created_at, updated_at, body}' \
+  > "$INPUTS/review-comments.jsonl"
 
 # A reviewer can discover instructions, skills, and MCP servers in a
 # directory it reads, so the head checkout drops them; the PR's

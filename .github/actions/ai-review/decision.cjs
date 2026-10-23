@@ -9,9 +9,10 @@ const { clean, code } = require('./constants.cjs');
 // against them. `cleared` tells reviewers' tools, such as the guided-review
 // skill, whether the comment says the code needs no second review. `since`,
 // when the review of this commit first reported a deferred finding, says only
-// an approval of this commit given after then counts.
-const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null }) =>
-  `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since })).toString('base64')} -->`;
+// an approval of this commit given after then counts, and `deferred` names the
+// findings it covers.
+const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null, deferred = [] }) =>
+  `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since, deferred })).toString('base64')} -->`;
 
 // The person is asked to decide the reasons, not to repeat the review. When
 // the code is cleared (see publish), the comment says so.
@@ -51,6 +52,7 @@ function storedDecision(comment, sha) {
         reasons: decision.reasons.map(String),
         reviewer: typeof login === 'string' ? { login, why: String(decision.reviewer.why) } : null,
         since: typeof decision.since === 'string' ? decision.since : null,
+        deferred: Array.isArray(decision.deferred) ? decision.deferred.map(String) : [],
       };
     }
   } catch {}

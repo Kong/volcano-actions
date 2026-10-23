@@ -26,8 +26,8 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 
 - The action's `prepare` step builds the inputs in a checkout of the base
   branch: the diff, commit messages, and description; the comments the
-  author and the repository's collaborators left on the PR, and those on its
-  lines; the previous verdict; a checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
+  author and the repository's collaborators left on the PR and on its lines,
+  with the review's own inline findings; the previous verdict; a checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
   `.mcp.json` files; the base's instruction files that govern the changed
   paths; and the reviewer candidates. Its outputs give the reviewer the policy,
   with the caller's `focus` applied, and the schema, along with a copy without
@@ -102,7 +102,8 @@ It passes when none applies, or once a collaborator with write access other
 than the author approves. Like the repositories' required approvals today, an
 approval carries across later pushes, except past a P2 the author deferred:
 then only an approval of that commit given after the review reported the
-deferral counts. Changes requested by a collaborator with write access hold it
+deferral counts. A re-run of the commit keeps that time unless it defers a
+finding the last review did not. Changes requested by a collaborator with write access hold it
 until they approve or their review is dismissed.
 The summary comment lists each reason as a question for the person to decide,
 and what the reviews could not check, such as behavior only running the code
@@ -130,7 +131,8 @@ publishes no verdict, so the head waits for a re-run.
 When it waits, the review requests one collaborator by name: the first
 reviewer's pick among the people with write access and recent commits to the
 changed files, falling back to whoever has the most, unless someone was
-already requested by name or has reviewed. A team request, such as from
+already requested by name or has reviewed. When an approval no longer counts
+because of a deferral, it asks that approver again instead. A team request, such as from
 CODEOWNERS, does not count, so a repository that opts in can drop a catch-all
 CODEOWNERS line.
 

@@ -3,6 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, humanStatusContext, verdict, publish, gate } = require('./ai-review.cjs');
+const { marker } = require('./constants.cjs');
+const { decisionMarker } = require('./decision.cjs');
 const {
   sha,
   url,
@@ -125,4 +127,40 @@ test('a deferred finding needs an approval of the reviewed commit given since', 
   });
   await gate({ github: gated.github, context: context({ action: 'labeled' }), core: core() });
   assert.equal(gated.set(humanStatusContext).at(-1)[1], 'pending');
+});
+
+// A re-run of a commit keeps the time of its deferral only when it defers
+// nothing new; otherwise an approval given before it asks that person again.
+test('a re-run that defers another finding needs a new approval', async (t) => {
+  const title = 'Move orchestration into a domain service';
+  const summary = (deferredTitles) => ({
+    id: 2,
+    user: { login: 'github-actions[bot]' },
+    body: `${marker}\n### AI review\n\n${decisionMarker(sha, { reasons: [question], reviewer: null, since: '2001-01-01T00:00:00Z', deferred: deferredTitles })}`,
+  });
+  const rerun = async (findings, stored) => {
+    useReviews(t, ['Claude', 'success', reviewJson({ findings }), '', 'claude-opus-5-5']);
+    const c = client({
+      reviews: [{ ...review('reviewer', 'APPROVED'), submitted_at: '2002-01-01T00:00:00Z' }],
+      comments: [summary(stored)],
+    });
+    await publish({ github: c.github, context: context(), core: core() });
+    const [{ body }] = c.named('updateComment');
+    const { since } = JSON.parse(Buffer.from(body.match(/<!-- ai-review-human (\S+) -->$/u)[1], 'base64'));
+    return {
+      state: c.set(humanStatusContext).at(-1)[1],
+      since,
+      asked: c.named('requestReviewers').map((r) => r.reviewers),
+    };
+  };
+  const same = await rerun([deferred('p2')], [title]);
+  assert.deepEqual(same, { state: 'success', since: '2001-01-01T00:00:00Z', asked: [] });
+  const another = [deferred('p2'), deferred('p2', { path: 'internal/b.go', title: 'Unchecked error from Close' })];
+  for (const stored of [[title], []]) {
+    const added = await rerun(another, stored);
+    assert.equal(added.state, 'pending');
+    assert.ok(Date.parse(added.since) > Date.parse('2002-01-01T00:00:00Z'));
+    // The approver whose approval no longer counts is asked again.
+    assert.deepEqual(added.asked, [['reviewer']]);
+  }
 });

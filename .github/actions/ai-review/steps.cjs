@@ -134,14 +134,17 @@ async function postFindings({ github, context, core }, reviewers) {
   }
 }
 
-// When the review of this head first reported a deferred finding, kept across
-// re-runs. An approval before then cannot have decided it, even of this commit
-// (see human.cjs). An unread summary dates it now, which only asks for more.
+// When the review of this head first reported its deferred findings, given as
+// titles. An approval before then cannot have decided them, even of this
+// commit (see human.cjs). A re-run keeps the time only when it defers nothing
+// the last review of this commit did not; a reworded or added deferral, or an
+// unread summary, dates it now, which only asks for more.
 async function deferredSince(github, context, sha, deferred) {
-  if (!deferred) return null;
+  if (deferred.length === 0) return null;
   try {
     const stored = storedDecision(await summaryComment(github, context, context.payload.pull_request.number), sha);
-    return stored?.since ?? new Date().toISOString();
+    const same = stored?.since && deferred.every((title) => stored.deferred.includes(title));
+    return same ? stored.since : new Date().toISOString();
   } catch {
     return new Date().toISOString();
   }
@@ -179,8 +182,9 @@ async function publish({ github, context, core }) {
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
   const paths = await pathReasons(github, context, pr.number);
-  const since = await deferredSince(github, context, pr.head.sha, result.deferred);
-  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer, since };
+  const deferred = result.deferred ?? [];
+  const since = await deferredSince(github, context, pr.head.sha, deferred);
+  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer, since, deferred };
   let live = null;
   try {
     live = await liveReasons(github, context, pull, pr.head.sha);
