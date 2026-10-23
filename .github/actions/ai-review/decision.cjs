@@ -33,11 +33,13 @@ function humanSection(sha, decision) {
   return ['', '', ...lines, '', decisionMarker(sha, decision)].join('\n');
 }
 
-// Only the marker that ends the comment counts: reviewer text above it could
-// contain a lookalike.
+// The marker as it ends the comment. Only that one counts: reviewer text above
+// it could contain a lookalike.
+const storedMarker = /\n<!-- ai-review-human ([A-Za-z0-9+/=]+) -->$/u;
+
 function storedDecision(comment, sha) {
   try {
-    const encoded = comment.body.match(/\n<!-- ai-review-human ([A-Za-z0-9+/=]+) -->$/u)[1];
+    const encoded = comment.body.match(storedMarker)[1];
     const decision = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
     if (decision.sha === sha && Array.isArray(decision.reasons)) {
       const login = decision.reviewer?.login;
@@ -50,4 +52,4 @@ function storedDecision(comment, sha) {
   return null;
 }
 
-module.exports = { decisionMarker, humanSection, storedDecision };
+module.exports = { decisionMarker, storedMarker, humanSection, storedDecision };

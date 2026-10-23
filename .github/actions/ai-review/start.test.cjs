@@ -108,6 +108,7 @@ const run = (id, head, overrides = {}) => ({
   workflow_id: 77,
   referenced_workflows: review,
   head_repository: { full_name: 'Kong/volcano-hosting' },
+  jobs: [{ name: 'ai-review / override', conclusion: 'skipped' }],
   ...overrides,
 });
 
@@ -139,6 +140,9 @@ function withRuns(options, runs, { cancel = () => null, failRun = false } = {}) 
           },
     ),
     listWorkflowRunsForRepo: answer('listWorkflowRunsForRepo', () => ({ data: { workflow_runs: runs } })),
+    listJobsForWorkflowRun: answer('listJobsForWorkflowRun', (args) => ({
+      data: { jobs: runs.find((r) => r.id === args.run_id)?.jobs ?? [] },
+    })),
     cancelWorkflowRun: answer('cancelWorkflowRun', (args) => (cancel(args) ? fail(cancel(args)) : { data: {} })),
   };
   return c;
@@ -154,8 +158,10 @@ test("the live head's review cancels the unfinished review runs of heads the PR 
     run(5, older, { created_at: '2026-10-23T12:00:01Z' }),
     run(6, older, { head_repository: { full_name: 'fork/volcano-hosting' } }),
     run(7, older, { status: 'waiting' }),
-    // The retarget-and-override stub calls the same review.
+    // The retarget-and-override stub calls the same review. A run applying
+    // the override label removes it as it ends, so it runs to the end.
     run(8, older, { workflow_id: 78 }),
+    run(12, older, { workflow_id: 78, jobs: [{ name: 'retarget-or-override / override', conclusion: null }] }),
     // Other workflows on the branch, including the human gate.
     run(10, older, { workflow_id: 79, referenced_workflows: [] }),
     run(11, older, {

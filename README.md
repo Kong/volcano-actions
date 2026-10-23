@@ -46,10 +46,11 @@ single review that names no reviewer or provider, however many ran:
 - The comment lists and counts each problem once, by title. Findings from
   different reviewers within 20 lines of each other in one file, or with
   nearly the same title, are one problem, shown at the most severe level any
-  reviewer gave it, with every location and the other reviewers' titles.
-  One reviewer's findings stay as it wrote them. Each finding on a line also gets an inline comment that
-  explains why it matters, with a footer naming the model that found it, so
-  two models reporting the same problem leave two comments.
+  reviewer gave it, with every location and the other reviewers' titles. One
+  reviewer's findings stay as it wrote them. Each finding on a line, except a
+  deferred P2, also gets an inline comment that explains why it matters, with
+  a footer naming the model that found it, so two models reporting the same
+  problem leave two comments.
 - Each round sees how people answered the last one. A P2 finding the PR
   author defers to named follow-up work, or declines with a concrete reason,
   in the description or a comment, is listed for a person to decide instead

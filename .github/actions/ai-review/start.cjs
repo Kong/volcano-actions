@@ -12,8 +12,9 @@ const calls = (run) => (run.referenced_workflows ?? []).map((w) => String(w.path
 
 // This run, and the other unfinished runs of the review on the PR's branch in
 // this repository: those of this workflow, and of any other caller workflow
-// that calls the same review, as the retarget-and-override stub does. Needs
-// `actions: read`.
+// that calls the same review, as the retarget-and-override stub does. A
+// pull_request_target run's head_sha is the PR head it was triggered for, not
+// the base, so it names the head each run reviews. Needs `actions: read`.
 async function reviewRuns(github, context, pull) {
   const { data: own } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.runId });
   const { data } = await github.rest.actions.listWorkflowRunsForRepo({
@@ -34,6 +35,14 @@ async function reviewRuns(github, context, pull) {
   return { own, others };
 }
 
+// Whether a run is applying the ai-review-override label: its override job
+// ran or will run. That job removes the label as it ends, so cancelling it
+// would leave the label on the PR, where adding it again fires no event.
+async function overriding(github, context, run) {
+  const { data } = await github.rest.actions.listJobsForWorkflowRun({ ...context.repo, run_id: run.id, per_page: 100 });
+  return data.jobs.some((job) => /(?:^|\/ )override$/u.test(job.name) && job.conclusion !== 'skipped');
+}
+
 // Cancels the review runs of heads the PR has moved past, whose verdicts
 // nobody reads. Each head's runs share a concurrency group of their own (see
 // ai-review.yml), so a push never cancels them by itself. start() calls this
@@ -50,7 +59,9 @@ async function reviewRuns(github, context, pull) {
 async function cancelSuperseded({ github, context, core }, pull) {
   const sha = context.payload.pull_request.head.sha;
   const { own, others } = await reviewRuns(github, context, pull);
-  const stale = others.filter((run) => run.head_sha !== sha && Date.parse(run.created_at) < Date.parse(own.created_at));
+  const older = others.filter((run) => run.head_sha !== sha && Date.parse(run.created_at) < Date.parse(own.created_at));
+  const stale = [];
+  for (const run of older) if (!(await overriding(github, context, run))) stale.push(run);
   if (stale.length === 0) return;
   // The PR moved on while this run looked; the newer head's run cancels.
   if ((await livePull(github, context)).head.sha !== sha) return;
