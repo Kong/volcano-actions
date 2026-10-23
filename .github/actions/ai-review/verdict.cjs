@@ -128,7 +128,7 @@ function describe(failed, problems, coverage) {
 // A person decides whether deferred findings can wait.
 const deferralReasons = (problems) =>
   deferredIn(problems).length > 0
-    ? ['Can the deferred P2 finding(s) in the summary wait for the follow-up the author named?']
+    ? ['Can the P2 finding(s) the author deferred or declined, listed in the summary, stand as the author answered?']
     : [];
 
 // How many reviews did not complete, without naming them, so the PR shows when
@@ -160,6 +160,8 @@ function verdict(reviewers, sha, url, candidates = []) {
     reviewer: suggestedReviewer(reviews, candidates),
     by: joinNames(done.map((entry) => entry.name)),
     missed,
+    // A person decides each deferral on this commit itself.
+    exact: deferredIn(shown.findings).length > 0,
   };
   const description = describe(failed, shown.findings, coverage);
   if (failed) {

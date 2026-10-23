@@ -2,8 +2,19 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { statusContext, verdict, publish } = require('./ai-review.cjs');
-const { sha, url, finding, routine, reviewJson, useReviews, client, context, core } = require('./test-helpers.cjs');
+const { statusContext, humanStatusContext, verdict, publish, gate } = require('./ai-review.cjs');
+const {
+  sha,
+  url,
+  finding,
+  routine,
+  reviewJson,
+  useReviews,
+  review,
+  client,
+  context,
+  core,
+} = require('./test-helpers.cjs');
 
 // The verdict from a Claude and a Codex review, each given as its findings and
 // human-review decision.
@@ -18,7 +29,8 @@ const both = (claude, codex, human = routine) =>
   );
 const deferred = (severity, overrides = {}) =>
   finding(severity, { title: 'Move orchestration into a domain service', deferred: true, ...overrides });
-const question = 'Can the deferred P2 finding(s) in the summary wait for the follow-up the author named?';
+const question =
+  'Can the P2 finding(s) the author deferred or declined, listed in the summary, stand as the author answered?';
 
 test('a P2 the author deferred goes to a person instead of failing the verdict', () => {
   const v = both([deferred('p2'), finding('p3', { line: 90, title: 'Stale comment' })], [deferred('p2', { line: 14 })]);
@@ -80,4 +92,29 @@ test('a deferred P2 gets no inline comment; any other finding still does', async
     [[30, '**🟠 P1:** Unchecked error']],
   );
   assert.equal(c.set(statusContext)[0][1], 'failure');
+});
+
+// An approval carries across pushes, but one given before the author deferred
+// a finding cannot have decided it.
+test('a deferred finding needs an approval of the reviewed commit itself', async (t) => {
+  useReviews(t, ['Claude', 'success', reviewJson({ findings: [deferred('p2')] }), '', 'claude-opus-5-5']);
+  const human = async (reviews) => {
+    const c = client({ reviews });
+    await publish({ github: c.github, context: context(), core: core() });
+    return { c, state: c.set(humanStatusContext).at(-1)[1] };
+  };
+  const earlier = await human([review('reviewer', 'APPROVED', 'User', 'fedcba9876543210')]);
+  assert.equal(earlier.state, 'pending');
+  assert.equal((await human([review('reviewer', 'APPROVED')])).state, 'success');
+  assert.equal(earlier.c.set(statusContext)[0][1], 'success');
+  const [{ body }] = earlier.c.named('createComment');
+  assert.match(body, /approve abcdef1 itself to accept them/u);
+
+  // The human gate reads the same rule back from the summary comment.
+  const later = client({
+    comments: [{ id: 2, user: { login: 'github-actions[bot]' }, body }],
+    reviews: [review('reviewer', 'APPROVED', 'User', 'fedcba9876543210')],
+  });
+  await gate({ github: later.github, context: context({ action: 'labeled' }), core: core() });
+  assert.equal(later.set(humanStatusContext).at(-1)[1], 'pending');
 });

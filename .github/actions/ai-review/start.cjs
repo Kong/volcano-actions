@@ -10,13 +10,14 @@ const unfinished = new Set(['requested', 'queued', 'pending', 'waiting', 'in_pro
 // The reusable workflows a run calls, without their refs.
 const calls = (run) => (run.referenced_workflows ?? []).map((w) => String(w.path).split('@')[0]);
 
-// This run, and the other unfinished runs of the review on the PR's branch in
-// this repository: those of this workflow, and of any other caller workflow
-// that calls the same review, as the retarget-and-override stub does. A
+// This run, and the other unfinished runs on the PR's branch in this
+// repository that call the same review workflow, as both caller stubs do. A
 // pull_request_target run's head_sha is the PR head it was triggered for, not
 // the base, so it names the head each run reviews. Needs `actions: read`.
 async function reviewRuns(github, context, pull) {
   const { data: own } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.runId });
+  const review = calls(own).find((path) => path.endsWith('/.github/workflows/ai-review.yml'));
+  if (!review) return { own, others: [] };
   const { data } = await github.rest.actions.listWorkflowRunsForRepo({
     ...context.repo,
     branch: pull.head.ref,
@@ -24,24 +25,25 @@ async function reviewRuns(github, context, pull) {
     per_page: 100,
   });
   const repo = `${context.repo.owner}/${context.repo.repo}`;
-  const review = calls(own);
   const others = data.workflow_runs.filter(
     (run) =>
       run.id !== own.id &&
       unfinished.has(run.status) &&
       run.head_repository?.full_name === repo &&
-      (run.workflow_id === own.workflow_id || calls(run).some((path) => review.includes(path))),
+      calls(run).includes(review),
   );
   return { own, others };
 }
 
+const jobsOf = async (github, context, run) =>
+  (await github.rest.actions.listJobsForWorkflowRun({ ...context.repo, run_id: run.id, per_page: 100 })).data.jobs;
+// A called workflow's job is named for the caller's job, as in `ai-review / start`.
+const ran = (jobs, name) => jobs.some((job) => job.name.endsWith(`/ ${name}`) && job.conclusion !== 'skipped');
+
 // Whether a run is applying the ai-review-override label: its override job
 // ran or will run. That job removes the label as it ends, so cancelling it
 // would leave the label on the PR, where adding it again fires no event.
-async function overriding(github, context, run) {
-  const { data } = await github.rest.actions.listJobsForWorkflowRun({ ...context.repo, run_id: run.id, per_page: 100 });
-  return data.jobs.some((job) => /(?:^|\/ )override$/u.test(job.name) && job.conclusion !== 'skipped');
-}
+const overriding = async (github, context, run) => ran(await jobsOf(github, context, run), 'override');
 
 // Cancels the review runs of heads the PR has moved past, whose verdicts
 // nobody reads. Each head's runs share a concurrency group of their own (see
@@ -78,11 +80,17 @@ async function cancelSuperseded({ github, context, core }, pull) {
 
 // Whether a pending verdict was left by a review that no longer runs, such as
 // one cancelled when the PR moved past its head, before the PR returned to it.
-// When the runs cannot be listed, it may still run.
+// A run of the head that skips start, such as an override, reviews nothing; one
+// whose jobs are not listed yet may. When the runs cannot be listed, a review
+// may still run.
 async function abandoned(github, context, pull, sha) {
   try {
     const { others } = await reviewRuns(github, context, pull);
-    return !others.some((run) => run.head_sha === sha);
+    for (const run of others.filter((r) => r.head_sha === sha)) {
+      const jobs = await jobsOf(github, context, run);
+      if (jobs.length === 0 || ran(jobs, 'start')) return false;
+    }
+    return true;
   } catch {
     return false;
   }

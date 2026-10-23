@@ -166,11 +166,12 @@ async function publish({ github, context, core }) {
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
   const paths = await pathReasons(github, context, pr.number);
-  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer };
+  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer, exact: Boolean(result.exact) };
   let live = null;
   try {
     live = await liveReasons(github, context, pull, pr.head.sha);
-    const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...decision.reasons, ...live]);
+    const reasons = [...decision.reasons, ...live];
+    const gate = await setHumanStatus(github, context, pull, pr.head.sha, reasons, decision.exact);
     await requestReviewer(github, context, core, pull, pr.head.sha, gate, decision.reviewer);
   } catch (error) {
     core.setFailed(`The verdict is published, but the human review status failed: ${error.message}`);
@@ -218,7 +219,7 @@ async function override({ github, context, core }) {
     overriddenBy(sender.login),
     ...(await liveReasons(github, context, pull, pr.head.sha)),
   ];
-  const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)]);
+  const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], stored?.exact);
   await setStatus(github, context, pr.head.sha, 'success', overriddenBy(sender.login));
   await removeOverrideLabel(github, context);
   await requestReviewer(github, context, core, pull, pr.head.sha, gate, stored?.reviewer);
@@ -252,7 +253,7 @@ async function gate({ github, context, core }) {
       continue;
     }
     const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
-    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)]);
+    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], stored?.exact);
     await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
   }
 }

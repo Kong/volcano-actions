@@ -87,7 +87,10 @@ The PR AUTHOR above may answer an earlier finding, in description.md
 or a comment of their own, by deferring it to named follow-up work,
 such as an issue, a PR, or a stated condition, or by declining it
 with a concrete reason it does not apply. Their latest answer
-counts, so a deferral they later withdrew no longer does. Set
+counts, so a deferral they later withdrew no longer does: a comment
+counts over the description, and among comments the one edited last
+(updated_at) counts. A reply's in_reply_to_id names the comment it
+answers. Set
 deferred to true on a finding you rank p2 that the author answered
 this way, unless the code has since changed in a way that makes it
 worse: a person then decides whether it can wait, instead of the

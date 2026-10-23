@@ -25,9 +25,9 @@ head from the same inputs, under one policy and output schema that ship with
 the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 
 - The action's `prepare` step builds the inputs in a checkout of the base
-  branch: the diff, commit messages, and description; the comments people
-  left on the PR and on its lines; the previous verdict; a
-  checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
+  branch: the diff, commit messages, and description; the comments the
+  author and the repository's collaborators left on the PR, and those on its
+  lines; the previous verdict; a checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
   `.mcp.json` files; the base's instruction files that govern the changed
   paths; and the reviewer candidates. Its outputs give the reviewer the policy,
   with the caller's `focus` applied, and the schema, along with a copy without
@@ -100,8 +100,10 @@ person's review. It waits for one when:
 
 It passes when none applies, or once a collaborator with write access other
 than the author approves. Like the repositories' required approvals today, an
-approval carries across later pushes. Changes requested by a collaborator
-with write access hold it until they approve or their review is dismissed.
+approval carries across later pushes, except past a P2 the author deferred:
+then only an approval of that commit counts. Changes requested by a
+collaborator with write access hold it until they approve or their review is
+dismissed.
 The summary comment lists each reason as a question for the person to decide,
 and what the reviews could not check, such as behavior only running the code
 shows. When the reviews found nothing blocking, each read the whole change

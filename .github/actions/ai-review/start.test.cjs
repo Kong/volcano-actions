@@ -108,7 +108,10 @@ const run = (id, head, overrides = {}) => ({
   workflow_id: 77,
   referenced_workflows: review,
   head_repository: { full_name: 'Kong/volcano-hosting' },
-  jobs: [{ name: 'ai-review / override', conclusion: 'skipped' }],
+  jobs: [
+    { name: 'ai-review / start', conclusion: 'success' },
+    { name: 'ai-review / override', conclusion: 'skipped' },
+  ],
   ...overrides,
 });
 
@@ -162,8 +165,10 @@ test("the live head's review cancels the unfinished review runs of heads the PR 
     // the override label removes it as it ends, so it runs to the end.
     run(8, older, { workflow_id: 78 }),
     run(12, older, { workflow_id: 78, jobs: [{ name: 'retarget-or-override / override', conclusion: null }] }),
-    // Other workflows on the branch, including the human gate.
+    // Other workflows on the branch, including the caller's own workflow when
+    // a run calls nothing else, and the human gate.
     run(10, older, { workflow_id: 79, referenced_workflows: [] }),
+    run(13, older, { referenced_workflows: [] }),
     run(11, older, {
       workflow_id: 80,
       referenced_workflows: [{ path: 'Kong/volcano-actions/.github/workflows/ai-review-human.yml@main' }],
@@ -231,6 +236,14 @@ test('a reopen reviews a head whose pending verdict no run is still working on',
   };
   assert.equal(await reopen(withRuns(pending, [run(1, older)])), 'true');
   assert.equal(await reopen(withRuns(pending, [run(1, sha)])), 'false');
+  // A run that has not listed its jobs yet may still review the head.
+  assert.equal(await reopen(withRuns(pending, [run(1, sha, { jobs: [] })])), 'false');
+  // An override of the head reviews nothing.
+  const override = [
+    { name: 'retarget-or-override / start', conclusion: 'skipped' },
+    { name: 'retarget-or-override / override', conclusion: null },
+  ];
+  assert.equal(await reopen(withRuns(pending, [run(1, sha, { workflow_id: 78, jobs: override })])), 'true');
   assert.equal(await reopen(withRuns(pending, [], { failRun: true })), 'false');
   assert.equal(await reopen(withRuns({ statuses: [{ context: statusContext, state: 'failure' }] }, [])), 'false');
 });

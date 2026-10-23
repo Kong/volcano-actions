@@ -32,7 +32,7 @@ done
 git log --format='%h %s%n%n%b' "$BASE_SHA..$HEAD_SHA" > "$INPUTS/commits.txt"
 gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '"# " + .title + "\n\n" + (.body // "")' > "$INPUTS/description.md"
 gh api "repos/$REPO/pulls/$PR_NUMBER/comments" --paginate \
-  --jq '.[] | {path, line, author: .user.login, created_at, updated_at, body}' > "$INPUTS/review-comments.jsonl"
+  --jq '.[] | {id, in_reply_to_id, path, line, original_line, author: .user.login, created_at, updated_at, body}' > "$INPUTS/review-comments.jsonl"
 
 # A reviewer can discover instructions, skills, and MCP servers in a
 # directory it reads, so the head checkout drops them; the PR's

@@ -58,10 +58,13 @@ function humanState({ approvers, blockers }, reasons) {
 }
 
 // An approval carries across pushes, as it does under the repositories'
-// required approvals today, none of which dismiss stale reviews.
-async function setHumanStatus(github, context, pull, sha, reasons) {
+// required approvals today, none of which dismiss stale reviews. With `exact`,
+// as for a finding the author deferred, only an approval of this commit counts:
+// an earlier one predates the decision it would stand for.
+async function setHumanStatus(github, context, pull, sha, reasons, exact = false) {
   const reviews = await standing(github, context, pull);
-  const [state, description] = humanState(reviews, reasons);
+  const counted = exact ? { ...reviews, approvers: reviews.approvers.filter((a) => a.commit === sha) } : reviews;
+  const [state, description] = humanState(counted, reasons);
   await setStatus(github, context, sha, state, fit(description), humanStatusContext);
   await settleIncompleteReview(github, context, sha, reviews.approvers);
   return { waiting: state === 'pending' && reviews.blockers.length === 0 && !reviews.reviewed };
