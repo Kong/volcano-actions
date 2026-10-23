@@ -19,14 +19,15 @@ async function reviewRuns(github, context, pull) {
   const review = calls(own).find((path) => path.endsWith('/.github/workflows/ai-review.yml'));
   // Without it, the other runs are unknown.
   if (!review) return { own, others: null };
-  const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+  // Every page: an unfinished run can sit behind a hundred newer ones.
+  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
     ...context.repo,
     branch: pull.head.ref,
     event: 'pull_request_target',
     per_page: 100,
   });
   const repo = `${context.repo.owner}/${context.repo.repo}`;
-  const others = data.workflow_runs.filter(
+  const others = runs.filter(
     (run) =>
       run.id !== own.id &&
       unfinished.has(run.status) &&

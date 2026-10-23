@@ -148,6 +148,12 @@ function withRuns(options, runs, { cancel = () => null, failRun = false, calls =
     })),
     cancelWorkflowRun: answer('cancelWorkflowRun', (args) => (cancel(args) ? fail(cancel(args)) : { data: {} })),
   };
+  // Octokit's paginate returns every page's runs as one list.
+  const { paginate } = c.github;
+  c.github.paginate = async (method, args) =>
+    method === c.github.rest.actions.listWorkflowRunsForRepo
+      ? (await method(args)).data.workflow_runs
+      : paginate(method, args);
   return c;
 }
 const cancelled = (c) => c.named('cancelWorkflowRun').map((call) => call.run_id);

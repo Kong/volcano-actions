@@ -111,7 +111,11 @@ test('a deferred finding needs an approval of the reviewed commit given since', 
   assert.equal(earlier.state, 'pending');
   assert.equal((await human([approved(sha, '2001-01-01T00:00:00Z')])).state, 'pending');
   assert.equal((await human([approved(sha, later)])).state, 'success');
-  assert.equal(earlier.c.set(statusContext)[0][1], 'success');
+  // The verdict passes once the summary records the deferral.
+  assert.deepEqual(
+    earlier.c.set(statusContext).map(([, state]) => state),
+    ['failure', 'success'],
+  );
   const [{ body }] = earlier.c.named('createComment');
   assert.match(body, /approve abcdef1 now to accept them/u);
 
@@ -168,6 +172,21 @@ test('a re-run that defers another problem needs a new approval', async (t) => {
     assert.ok(Date.parse(added.since) > Date.parse('2002-01-01T00:00:00Z'), why);
     // The approver whose approval no longer counts is asked again.
     assert.deepEqual(added.asked, [['reviewer']], why);
+  }
+});
+
+// The human gate reads the deferral back from the summary, so a deferral the
+// summary does not record keeps the verdict failing.
+test('a deferred finding fails the verdict when the summary cannot record it', async (t) => {
+  useReviews(t, ['Claude', 'success', reviewJson({ findings: [deferred('p2')] }), '', 'claude-opus-5-5']);
+  for (const options of [{ failComments: true }, { liveHead: 'fedcba9876543210' }]) {
+    const c = client(options);
+    await publish({ github: c.github, context: context(), core: core() });
+    assert.deepEqual(
+      c.set(statusContext).map(([, state, description]) => [state, description]),
+      [['failure', 'The summary does not record the deferred finding(s) yet. If this stays, re-run the review.']],
+      JSON.stringify(options),
+    );
   }
 });
 

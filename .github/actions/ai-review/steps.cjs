@@ -34,10 +34,11 @@ async function headReviewedElsewhere(github, context) {
 
 // One summary comment per PR, edited in place, for the live head only: the
 // statuses belong to the reviewed SHA, the summary to the live head.
+// Says whether it wrote the comment.
 async function publishSummary({ github, context, core }, result, decision) {
   const pr = context.payload.pull_request;
   try {
-    if (!(await isLiveHead(github, context))) return;
+    if (!(await isLiveHead(github, context))) return false;
     const body =
       result.state === 'error'
         ? `${result.body}\n\n${decisionMarker(pr.head.sha, decision)}`
@@ -48,8 +49,10 @@ async function publishSummary({ github, context, core }, result, decision) {
     } else {
       await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body });
     }
+    return true;
   } catch (error) {
     core.setFailed(`The verdict is published, but the summary comment failed: ${error.message}`);
+    return false;
   }
 }
 
@@ -112,6 +115,19 @@ async function settleHuman({ github, context, core }, pull, decision, live) {
   }
 }
 
+// A job that failed has no output to read, but one that succeeded should.
+function warnUnread(core, reviewers) {
+  for (const reviewer of reviewers) {
+    if (reviewer.result === 'success' && reviewer.unread) {
+      core.warning(`Could not read the ${reviewer.name} review's output: ${reviewer.unread}`);
+    }
+  }
+}
+
+// A verdict that passes only because of a deferral fails until the summary
+// records when the deferral was made, which later events read back.
+const unrecorded = 'The summary does not record the deferred finding(s) yet. If this stays, re-run the review.';
+
 // Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
 // head, then the summary comment, then each review's inline comments.
 async function publish({ github, context, core }) {
@@ -131,15 +147,17 @@ async function publish({ github, context, core }) {
     );
     return;
   }
-  // A job that failed has no output to read, but one that succeeded should.
-  for (const reviewer of reviewers) {
-    if (reviewer.result === 'success' && reviewer.unread) {
-      core.warning(`Could not read the ${reviewer.name} review's output: ${reviewer.unread}`);
-    }
-  }
+  warnUnread(core, reviewers);
   const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
   // The status goes first so a failed comment cannot leave the head pending.
-  await setStatus(github, context, pr.head.sha, result.state, result.description);
+  const held = result.state === 'success' && result.deferred.length > 0;
+  await setStatus(
+    github,
+    context,
+    pr.head.sha,
+    held ? 'failure' : result.state,
+    held ? unrecorded : result.description,
+  );
   reportIncomplete(core, pr.head.sha, result);
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
@@ -156,7 +174,8 @@ async function publish({ github, context, core }) {
   // Dated just before the summary reports a deferral, and the human status
   // follows it, so no approval given before a person could read it counts.
   decision.since = await deferredSince(github, context, pr.head.sha, decision.deferred);
-  await publishSummary({ github, context, core }, result, decision);
+  const stored = await publishSummary({ github, context, core }, result, decision);
+  if (held && stored) await setStatus(github, context, pr.head.sha, 'success', result.description);
   if (live) await settleHuman({ github, context, core }, pull, decision, live);
   await postFindings({ github, context, core }, reviewers);
 }

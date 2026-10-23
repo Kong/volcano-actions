@@ -56,7 +56,8 @@ single review that names no reviewer or provider, however many ran:
   author defers to named follow-up work, or declines with a concrete reason,
   in the description or a comment, is listed for a person to decide instead
   of failing the verdict again, unless the code has since made it worse. P0
-  and P1 findings still fail.
+  and P1 findings still fail. Such a verdict passes only once the summary
+  comment records the deferral, which the human review reads back.
 - When a provider has an outage or its review otherwise does not complete, the
   other reviewers' verdict stands, and the run log warns which one is missing.
   When none completes, the verdict is an error and the head waits for a
