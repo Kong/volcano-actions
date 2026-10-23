@@ -45,8 +45,8 @@ single review that names no reviewer or provider, however many ran:
 - A P0-P2 finding from any reviewer fails it, unless it is a P2 the author
   deferred (see below). Any reviewer can ask for a person.
 - The comment lists and counts each problem once, by title. Findings from
-  different reviewers within 20 lines of each other in one file, or with
-  nearly the same title, are one problem, shown at the most severe level any
+  different reviewers with nearly the same title, or else within 20 lines of
+  each other in one file, are one problem, shown at the most severe level any
   reviewer gave it, with every location and the other reviewers' titles. One
   reviewer's findings stay as it wrote them. Each finding on a line, except a
   deferred P2, also gets an inline comment that explains why it matters, with
@@ -103,11 +103,11 @@ person's review. It waits for one when:
 It passes when none applies, or once a collaborator with write access other
 than the author approves. Like the repositories' required approvals today, an
 approval carries across later pushes, except past a P2 the author deferred:
-then only an approval of that commit given after the review reported the
-deferral counts. A re-run of the commit keeps that time unless it defers a
-problem the last review did not, by title and location. Changes requested by a
-collaborator with write access hold it until they approve or their review is
-dismissed.
+then only an approval of that commit given after GitHub recorded the summary
+that reported the deferral counts. A re-run of the commit keeps that time
+unless it defers a problem the last review did not, naming each finding in it
+by title and line. Changes requested by a collaborator with write access hold
+it until they approve or their review is dismissed.
 The summary comment lists each reason as a question for the person to decide,
 and what the reviews could not check, such as behavior only running the code
 shows. When the reviews found nothing blocking, each read the whole change

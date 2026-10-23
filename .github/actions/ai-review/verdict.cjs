@@ -46,9 +46,6 @@ function shape(review) {
 
 // A P2 the PR author deferred, which a person decides instead of the verdict.
 const deferrable = (f) => f.severity === 'p2' && f.deferred;
-// A problem by its title and every location, which tells apart two problems
-// one reviewer gave the same title.
-const identity = (p) => [p.title, ...p.at.map(({ path, lines }) => `${path}:${lines.join(',')}`)].join(' @ ');
 
 // Every review as one: each problem once, however many reviewers reported it
 // (see problems.cjs), and every gap. The summary is the first review's, or,
@@ -164,7 +161,7 @@ function verdict(reviewers, sha, url, candidates = []) {
     by: joinNames(done.map((entry) => entry.name)),
     missed,
     // A person decides each deferral, after it was made (see publish).
-    deferred: deferredIn(shown.findings).map((p) => identity(p)),
+    deferred: deferredIn(shown.findings).map((p) => p.key),
   };
   const description = describe(failed, shown.findings, coverage);
   if (failed) {

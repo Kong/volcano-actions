@@ -20,6 +20,7 @@ const { reviewerCandidates } = require('./candidates.cjs');
 const { reviewersOf } = require('./reviews.cjs');
 const { postFindings } = require('./findings.cjs');
 const { start } = require('./start.cjs');
+const { keptSince, cutoff } = require('./deferral.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
 // the same head. Without one, it still publishes, so a reopen finds a verdict.
@@ -32,27 +33,45 @@ async function headReviewedElsewhere(github, context) {
   return data.some((p) => p.number !== pr.number && p.state === 'open' && p.head.sha === pr.head.sha);
 }
 
+// The summary comment's body for a verdict and its decision.
+function summaryBody(context, result, decision) {
+  const { sha } = context.payload.pull_request.head;
+  return result.state === 'error'
+    ? `${result.body}\n\n${decisionMarker(sha, decision)}`
+    : `${result.body}${humanSection(sha, decision)}`;
+}
+
 // One summary comment per PR, edited in place, for the live head only: the
-// statuses belong to the reviewed SHA, the summary to the live head.
-// Says whether it wrote the comment.
+// statuses belong to the reviewed SHA, the summary to the live head. Returns
+// the comment as written, or null when it was not.
 async function publishSummary({ github, context, core }, result, decision) {
   const pr = context.payload.pull_request;
   try {
-    if (!(await isLiveHead(github, context))) return false;
-    const body =
-      result.state === 'error'
-        ? `${result.body}\n\n${decisionMarker(pr.head.sha, decision)}`
-        : `${result.body}${humanSection(pr.head.sha, decision)}`;
+    if (!(await isLiveHead(github, context))) return null;
+    const body = summaryBody(context, result, decision);
     const existing = await summaryComment(github, context, pr.number);
-    if (existing) {
-      await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
-    } else {
-      await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body });
-    }
-    return true;
+    const { data } = existing
+      ? await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body })
+      : await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body });
+    return data;
   } catch (error) {
     core.setFailed(`The verdict is published, but the summary comment failed: ${error.message}`);
-    return false;
+    return null;
+  }
+}
+
+// Dates a new deferral when GitHub recorded the summary that reports it, so no
+// approval given before anyone could read it counts, and writes that time into
+// the summary's marker. Returns the comment as written, or null when it was not.
+async function dateDeferral({ github, context, core }, result, decision, written) {
+  try {
+    if (typeof written.updated_at !== 'string') throw new Error('GitHub did not say when it wrote the summary.');
+    decision.since = written.updated_at;
+    const body = summaryBody(context, result, decision);
+    return (await github.rest.issues.updateComment({ ...context.repo, comment_id: written.id, body })).data;
+  } catch (error) {
+    core.setFailed(`The verdict is published, but the summary comment failed to date the deferral: ${error.message}`);
+    return null;
   }
 }
 
@@ -62,33 +81,6 @@ function reportIncomplete(core, sha, result) {
   const rest = result.state === 'error' ? '' : `, so the verdict rests on ${result.by}`;
   for (const name of result.missed) core.warning(`The ${name} review of ${sha.slice(0, 7)} did not complete${rest}.`);
   if (result.state === 'error') core.setFailed(`No AI review produced a verdict for ${sha}.`);
-}
-
-// Whether every deferred problem, given by its identity (see verdict.cjs), is
-// one of the stored ones, counting repeats.
-function covered(deferred, stored) {
-  const left = [...stored];
-  for (const key of deferred) {
-    const i = left.indexOf(key);
-    if (i < 0) return false;
-    left.splice(i, 1);
-  }
-  return true;
-}
-
-// When the summary of this head first reported its deferred problems. An
-// approval before then cannot have decided them, even of this commit (see
-// human.cjs). A re-run keeps the time only when it defers nothing the last
-// review of this commit did not; a deferral that is new, moved, or reworded, or
-// an unread summary, dates it now, which only asks for more.
-async function deferredSince(github, context, sha, deferred) {
-  if (deferred.length === 0) return null;
-  try {
-    const stored = storedDecision(await summaryComment(github, context, context.payload.pull_request.number), sha);
-    return stored?.since && covered(deferred, stored.deferred) ? stored.since : new Date().toISOString();
-  } catch {
-    return new Date().toISOString();
-  }
 }
 
 // The labels' reasons for a person, or null when they cannot be read, which
@@ -103,15 +95,17 @@ async function liveOrNull({ github, context, core }, pull) {
 }
 
 // Sets the human status, once the summary says what a person decides, and asks
-// a reviewer when it waits.
+// a reviewer when it waits. Says whether it set it.
 async function settleHuman({ github, context, core }, pull, decision, live) {
   const sha = context.payload.pull_request.head.sha;
   try {
     const reasons = [...decision.reasons, ...live];
-    const gate = await setHumanStatus(github, context, pull, sha, reasons, decision.since);
+    const gate = await setHumanStatus(github, context, pull, sha, reasons, cutoff(decision));
     await requestReviewer(github, context, core, pull, sha, gate, decision.reviewer);
+    return true;
   } catch (error) {
     core.setFailed(`The verdict is published, but the human review status failed: ${error.message}`);
+    return false;
   }
 }
 
@@ -125,7 +119,8 @@ function warnUnread(core, reviewers) {
 }
 
 // A verdict that passes only because of a deferral fails until the summary
-// records when the deferral was made, which later events read back.
+// records when the deferral was made, which later events read back, and the
+// human status applies it.
 const unrecorded = 'The summary does not record the deferred finding(s) yet. If this stays, re-run the review.';
 
 // Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
@@ -171,12 +166,13 @@ async function publish({ github, context, core }) {
   // A reserved path or the needs-human-review label asks a person whatever
   // the reviews decide, so neither is theirs to clear; unread labels fail closed.
   decision.cleared = Boolean(result.cleared) && paths.length === 0 && live?.length === 0;
-  // Dated just before the summary reports a deferral, and the human status
-  // follows it, so no approval given before a person could read it counts.
-  decision.since = await deferredSince(github, context, pr.head.sha, decision.deferred);
-  const stored = await publishSummary({ github, context, core }, result, decision);
-  if (held && stored) await setStatus(github, context, pr.head.sha, 'success', result.description);
-  if (live) await settleHuman({ github, context, core }, pull, decision, live);
+  decision.since = await keptSince(github, context, pr.head.sha, decision.deferred);
+  let written = await publishSummary({ github, context, core }, result, decision);
+  if (written && decision.deferred.length > 0 && !decision.since) {
+    written = await dateDeferral({ github, context, core }, result, decision, written);
+  }
+  const settled = live !== null && (await settleHuman({ github, context, core }, pull, decision, live));
+  if (held && written && settled) await setStatus(github, context, pr.head.sha, 'success', result.description);
   await postFindings({ github, context, core }, reviewers);
 }
 
@@ -216,7 +212,7 @@ async function override({ github, context, core }) {
     overriddenBy(sender.login),
     ...(await liveReasons(github, context, pull, pr.head.sha)),
   ];
-  const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], stored?.since);
+  const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], cutoff(stored));
   await setStatus(github, context, pr.head.sha, 'success', overriddenBy(sender.login));
   await removeOverrideLabel(github, context);
   await requestReviewer(github, context, core, pull, pr.head.sha, gate, stored?.reviewer);
@@ -250,7 +246,7 @@ async function gate({ github, context, core }) {
       continue;
     }
     const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
-    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], stored?.since);
+    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], cutoff(stored));
     await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
   }
 }

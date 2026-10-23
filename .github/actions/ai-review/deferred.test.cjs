@@ -116,13 +116,18 @@ test('a deferred finding needs an approval of the reviewed commit given since', 
     earlier.c.set(statusContext).map(([, state]) => state),
     ['failure', 'success'],
   );
-  const [{ body }] = earlier.c.named('createComment');
+  // The summary is written, then dated when GitHub recorded it.
+  const [first] = earlier.c.named('createComment');
+  const [{ body }] = earlier.c.named('updateComment');
+  const stored = (text) => JSON.parse(Buffer.from(text.match(/<!-- ai-review-human (\S+) -->$/u)[1], 'base64'));
+  assert.equal(stored(first.body).since, null);
+  assert.equal(stored(body).since, '2026-10-23T12:00:05Z');
   assert.match(body, /approve abcdef1 now to accept them/u);
 
-  // A re-run keeps the time the deferral was first reported.
-  const since = JSON.parse(Buffer.from(body.match(/<!-- ai-review-human (\S+) -->$/u)[1], 'base64')).since;
-  const rerun = await human([approved(sha, since)], [{ id: 2, user: { login: 'github-actions[bot]' }, body }]);
-  assert.equal(rerun.state, 'success');
+  // A re-run keeps that time, and only an approval after it counts.
+  const comments = [{ id: 2, user: { login: 'github-actions[bot]' }, body }];
+  assert.equal((await human([approved(sha, '2026-10-23T12:00:05Z')], comments)).state, 'pending');
+  assert.equal((await human([approved(sha, '2026-10-23T12:00:06Z')], comments)).state, 'success');
 
   // The human gate reads the same rule back from the summary comment.
   const gated = client({
@@ -144,14 +149,18 @@ test('a re-run that defers another problem needs a new approval', async (t) => {
     user: { login: 'github-actions[bot]' },
     body: `${marker}\n### AI review\n\n${decisionMarker(sha, { reasons: [question], reviewer: null, since: '2001-01-01T00:00:00Z', deferred: deferredProblems })}`,
   });
-  const rerun = async (findings, deferredProblems) => {
-    useReviews(t, ['Claude', 'success', reviewJson({ findings }), '', 'claude-opus-5-5']);
+  const rerun = async (findings, deferredProblems, codex = []) => {
+    useReviews(
+      t,
+      ['Claude', 'success', reviewJson({ findings }), '', 'claude-opus-5-5'],
+      ['Codex', 'success', reviewJson({ findings: codex }), '', 'gpt-6.1-sol'],
+    );
     const c = client({
       reviews: [{ ...review('reviewer', 'APPROVED'), submitted_at: '2002-01-01T00:00:00Z' }],
       comments: [summary(deferredProblems)],
     });
     await publish({ github: c.github, context: context(), core: core() });
-    const [{ body }] = c.named('updateComment');
+    const { body } = c.named('updateComment').at(-1);
     const { since } = JSON.parse(Buffer.from(body.match(/<!-- ai-review-human (\S+) -->$/u)[1], 'base64'));
     return {
       state: c.set(humanStatusContext).at(-1)[1],
@@ -161,13 +170,19 @@ test('a re-run that defers another problem needs a new approval', async (t) => {
   };
   const same = await rerun([deferred('p2')], stored);
   assert.deepEqual(same, { state: 'success', since: '2001-01-01T00:00:00Z', asked: [] });
-  for (const [why, findings, before] of [
+  for (const [why, findings, before, codex] of [
     ['another problem', [deferred('p2'), deferred('p2', { path: 'internal/b.go', title: 'Unchecked error' })], stored],
     ['a second problem under the same title', [deferred('p2'), deferred('p2', { path: 'internal/c.go' })], stored],
     ['the problem elsewhere', [deferred('p2', { line: 40 })], stored],
     ['a summary that names none', [deferred('p2')], []],
+    [
+      "another reviewer's problem at the same line",
+      [deferred('p2')],
+      stored,
+      [deferred('p2', { title: 'Nil map write' })],
+    ],
   ]) {
-    const added = await rerun(findings, before);
+    const added = await rerun(findings, before, codex);
     assert.equal(added.state, 'pending', why);
     assert.ok(Date.parse(added.since) > Date.parse('2002-01-01T00:00:00Z'), why);
     // The approver whose approval no longer counts is asked again.
@@ -177,9 +192,10 @@ test('a re-run that defers another problem needs a new approval', async (t) => {
 
 // The human gate reads the deferral back from the summary, so a deferral the
 // summary does not record keeps the verdict failing.
-test('a deferred finding fails the verdict when the summary cannot record it', async (t) => {
+test('a deferred finding fails the verdict when the summary cannot record it, or the human status apply it', async (t) => {
   useReviews(t, ['Claude', 'success', reviewJson({ findings: [deferred('p2')] }), '', 'claude-opus-5-5']);
-  for (const options of [{ failComments: true }, { liveHead: 'fedcba9876543210' }]) {
+  // Nor does it pass when the human status cannot apply the deferral.
+  for (const options of [{ failComments: true }, { liveHead: 'fedcba9876543210' }, { failReviews: true }]) {
     const c = client(options);
     await publish({ github: c.github, context: context(), core: core() });
     assert.deepEqual(
@@ -190,14 +206,21 @@ test('a deferred finding fails the verdict when the summary cannot record it', a
   }
 });
 
-// The deferral dates from just before the summary reports it, and the human
-// status follows the summary, so nobody approves before they could read it.
-test('the human status is set after the summary reports a deferral', async (t) => {
+// The deferral dates from when GitHub recorded the summary that reports it, and
+// the human status follows, so nobody approves before they could read it.
+test('the human status is set after the summary dates a deferral, and the verdict passes after it', async (t) => {
   useReviews(t, ['Claude', 'success', reviewJson({ findings: [deferred('p2')] }), '', 'claude-opus-5-5']);
   const c = client();
   await publish({ github: c.github, context: context(), core: core() });
   const order = c.calls
-    .filter((call) => call.call === 'createComment' || call.context === humanStatusContext)
-    .map((call) => call.call);
-  assert.deepEqual(order, ['createComment', 'createCommitStatus']);
+    .filter((call) => ['createComment', 'updateComment', 'createCommitStatus'].includes(call.call))
+    .map((call) => (call.context ? `${call.context} ${call.state}` : call.call));
+  // The verdict passes last, once the human status applies the dated deferral.
+  assert.deepEqual(order, [
+    `${statusContext} failure`,
+    'createComment',
+    'updateComment',
+    `${humanStatusContext} pending`,
+    `${statusContext} success`,
+  ]);
 });

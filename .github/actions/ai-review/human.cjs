@@ -64,7 +64,7 @@ function humanState({ approvers, blockers }, reasons) {
 // Those approvers are `stale`, to be asked again.
 async function setHumanStatus(github, context, pull, sha, reasons, since = null) {
   const reviews = await standing(github, context, pull);
-  const after = (a) => a.commit === sha && Date.parse(a.at) >= Date.parse(since);
+  const after = (a) => a.commit === sha && Date.parse(a.at) > Date.parse(since);
   const counted = since ? { ...reviews, approvers: reviews.approvers.filter((a) => after(a)) } : reviews;
   const stale = reviews.approvers.filter((a) => !counted.approvers.includes(a)).map((a) => a.login);
   const [state, description] = humanState(counted, reasons);

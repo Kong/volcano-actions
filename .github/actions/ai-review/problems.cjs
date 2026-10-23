@@ -64,8 +64,6 @@ function similarTitles(a, b) {
 
 const nearby = (a, b) => a.path === b.path && a.line > 0 && b.line > 0 && Math.abs(a.line - b.line) <= nearbyLines;
 
-const sameProblem = (a, b) => nearby(a, b) || similarTitles(a.title, b.title);
-
 // Each problem's paths and lines, as the summary shows them: lines ascending
 // within a path, and a path alone for a finding on the whole file.
 function locations(group) {
@@ -89,22 +87,36 @@ function fit(group, f) {
 }
 const better = (a, b) => a.title > b.title || (a.title === b.title && a.distance < b.distance);
 
-// The problem a finding joins: of those it matches that hold no finding from
-// its reviewer, the one it fits best.
-function bestFor(groups, f) {
+// The problem a finding joins by title: of those whose titles it nearly
+// matches and that hold no finding from its reviewer, the one it fits best.
+function byTitle(groups, f) {
   let best = null;
   for (const group of groups) {
-    if (group.some((m) => m.reviewer === f.reviewer) || !group.some((m) => sameProblem(m, f))) continue;
+    if (group.some((m) => m.reviewer === f.reviewer) || !group.some((m) => similarTitles(m.title, f.title))) continue;
     const score = fit(group, f);
     if (!best || better(score, best.score)) best = { group, score };
   }
   return best?.group;
 }
 
+// The nearest earlier problem a problem joins by its lines: one that shares no
+// reviewer with it and has a finding nearby.
+function byLines(groups, group) {
+  let best = null;
+  for (const other of groups) {
+    if (other.some((m) => group.some((f) => f.reviewer === m.reviewer))) continue;
+    const distance = Math.min(...group.map((f) => fit(other, f).distance));
+    if (distance < (best?.distance ?? Infinity)) best = { other, distance };
+  }
+  return best?.other;
+}
+
 // A problem as the summary shows it: its most severe finding's level and title,
 // the other reviewers' titles that say something else, so a wrong merge hides
 // nothing, and every location. It is deferred when each of its P0-P2 findings
-// is a P2 the author deferred (see policy.md); no other level can be.
+// is a P2 the author deferred (see policy.md); no other level can be. Its key
+// names each finding in it by title and line, which tells apart any two
+// problems, so a person's decision on one never stands for another.
 function shown(group) {
   const titles = [group[0].title];
   for (const { title } of group.slice(1)) if (!titles.some((t) => similarTitles(t, title))) titles.push(title);
@@ -115,21 +127,32 @@ function shown(group) {
     also: titles.slice(1),
     at: locations(group),
     deferred: blocking.length > 0 && blocking.every((m) => m.severity === 'p2' && m.deferred === true),
+    key: group
+      .map((m) => `${m.title} @ ${m.path}:${m.line}`)
+      .toSorted()
+      .join(' | '),
   };
 }
 
 // The problems in each reviewer's findings, given as one list per reviewer,
-// most severe first. A finding joins a problem with a finding from another
-// reviewer at most nearbyLines away in the same file, or with nearly the same
-// title, unless that problem already holds one of its own reviewer's: one
+// most severe first. Findings with nearly the same title join first, at every
+// level, so a nearby finding cannot take one from the problem its title names;
+// then a problem joins another with a finding at most nearbyLines away in the
+// same file. A problem never holds two findings from one reviewer: one
 // reviewer's findings stay as distinct as it wrote them.
 function problems(findingsByReviewer) {
   const all = findingsByReviewer.flatMap((findings, reviewer) => findings.map((f) => ({ ...f, reviewer })));
-  const groups = [];
+  const titled = [];
   for (const f of all.toSorted((a, b) => levels.indexOf(a.severity) - levels.indexOf(b.severity))) {
-    const group = bestFor(groups, f);
+    const group = byTitle(titled, f);
     if (group) group.push(f);
-    else groups.push([f]);
+    else titled.push([f]);
+  }
+  const groups = [];
+  for (const group of titled) {
+    const other = byLines(groups, group);
+    if (other) other.push(...group);
+    else groups.push(group);
   }
   return groups.map((group) => shown(group));
 }

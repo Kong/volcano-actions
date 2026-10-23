@@ -121,8 +121,11 @@ const recorder =
 
 const issuesApi = (record) => ({
   listComments: () => {},
-  createComment: record('createComment'),
-  updateComment: record('updateComment'),
+  // GitHub answers a comment write with the comment, dated to the second.
+  createComment: record('createComment', () => ({ data: { id: 2, updated_at: '2026-10-23T12:00:05Z' } })),
+  updateComment: record('updateComment', (args) => ({
+    data: { id: args.comment_id, updated_at: '2026-10-23T12:00:05Z' },
+  })),
   removeLabel: record('removeLabel'),
 });
 

@@ -138,3 +138,15 @@ test('a finding joins the problem it fits best, by title and then by line', () =
     '- `internal/a.go:14,28` Unchecked error from Close',
   ]);
 });
+
+test('a title names its problem before a nearby line does, at every level', () => {
+  const v = both(
+    [at('internal/a.go', 10, 'p1', 'Nil map write'), at('internal/a.go', 25, 'p3', 'Unchecked error from Close')],
+    [at('internal/a.go', 26, 'p2', 'Unchecked error from Close')],
+  );
+  assert.equal(v.description, '2 P0-P2 finding(s). See the AI review comment.');
+  assert.deepEqual(listed(v), [
+    '- `internal/a.go:10` Nil map write',
+    '- `internal/a.go:25,26` Unchecked error from Close',
+  ]);
+});
