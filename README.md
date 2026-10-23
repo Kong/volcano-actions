@@ -25,7 +25,8 @@ head from the same inputs, under one policy and output schema that ship with
 the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 
 - The action's `prepare` step builds the inputs in a checkout of the base
-  branch: the diff, commit messages, description, and inline comments; a
+  branch: the diff, commit messages, and description; the comments people
+  left on the PR and on its lines; the previous verdict; a
   checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
   `.mcp.json` files; the base's instruction files that govern the changed
   paths; and the reviewer candidates. Its outputs give the reviewer the policy,
@@ -46,6 +47,10 @@ single review that names no reviewer or provider, however many ran:
   a line also gets an inline comment that explains why it matters, with a
   footer naming the model that found it, so two models reporting the same
   problem leave two comments.
+- Each round sees how people answered the last one. A finding the PR author
+  defers or declines with a reason, in the description, a commit message, or
+  a comment, becomes a question for the human review instead of failing the
+  verdict again, unless the code has since made it worse. A P0 still fails.
 - When a provider has an outage or its review otherwise does not complete, the
   other reviewers' verdict stands, and the run log warns which one is missing.
   When none completes, the verdict is an error and the head waits for a
@@ -81,8 +86,9 @@ person's review. It waits for one when:
   boundary (including a new third-party dependency, or CI or review
   configuration that gains access or weakens a check), breaks a contract
   others rely on, changes billing or pricing, does something its description
-  does not explain, or could not be reviewed closely. No kind of file needs a
-  person by itself; simple, low-risk changes pass whatever they touch.
+  does not explain, carries a finding its author deferred or declined, or
+  could not be reviewed closely. No kind of file needs a person by itself;
+  simple, low-risk changes pass whatever they touch.
 - The change touches a path the repository lists in `human_review_paths`.
 - Someone adds the `needs-human-review` label.
 - The verdict was overridden, or the PR comes from a fork.

@@ -25,13 +25,16 @@ async function removeOverrideLabel(github, context) {
   }
 }
 
+// The summary comment publish posts and edits, which the workflow's token writes.
+const isSummary = (comment) => comment.user?.login === 'github-actions[bot]' && comment.body?.startsWith(marker);
+
 async function summaryComment(github, context, number) {
   const comments = await github.paginate(github.rest.issues.listComments, {
     ...context.repo,
     issue_number: number,
     per_page: 100,
   });
-  return comments.find((c) => c.user?.login === 'github-actions[bot]' && c.body?.startsWith(marker));
+  return comments.find((c) => isSummary(c));
 }
 
 async function verdictStatus(github, context, sha) {
@@ -77,6 +80,7 @@ async function liveReasons(github, context, pull, sha) {
 module.exports = {
   setStatus,
   removeOverrideLabel,
+  isSummary,
   summaryComment,
   verdictStatus,
   verdictState,
