@@ -81,16 +81,19 @@ previous-verdict.md and the two comment files show what earlier
 rounds of this review found and how people answered. Check each
 earlier finding against the code at this head, and report it again
 only if it still applies. A reply saying it is fixed is not
-evidence; the code is. When the PR AUTHOR above, in description.md,
-commits.txt, or a comment, defers an earlier finding to later work
-or declines it, and says why, the finding is a judgment call for a
-person. Give it as a human-review reason that names the finding and
-the author's reason, such as "Should order orchestration stay in the
-handlers package until the follow-up PR the author proposes moves it
-(handlers/orders.go)?", grouping several into one if they do not
-fit, and do not report it as a finding unless the code has since
-changed in a way that makes it worse. This does not apply to a p0,
-or to a deferral without a reason or by anyone else.
+evidence; the code is.
+
+The PR AUTHOR above may answer an earlier finding, in description.md
+or a comment of their own, by deferring it to named follow-up work,
+such as an issue, a PR, or a stated condition, or by declining it
+with a concrete reason it does not apply. Their latest answer
+counts, so a deferral they later withdrew no longer does. Set
+deferred to true on a finding you rank p2 that the author answered
+this way, unless the code has since changed in a way that makes it
+worse: a person then decides whether it can wait, instead of the
+finding failing the review again. Set deferred to false on every
+other finding, including every p0 and p1, a finding answered
+without a concrete reason, and one answered by anyone else.
 
 Give each finding a one-line title. In its detail, say why it
 matters: what triggers the problem and its concrete result, and the
@@ -116,7 +119,6 @@ findings may not. A person is needed when the change:
   the meaning of a public API, CLI, or SDK endpoint, field, flag,
   or error, or rejecting input that used to be accepted;
 - changes billing or pricing;
-- carries a finding the author deferred or declined, as above;
 - does something description.md and commits.txt do not explain; or
 - could not be reviewed closely: it is too large, or hides content.
 

@@ -44,8 +44,9 @@ test('a problem two reviewers report nearby in one file counts once, with every 
   assert.ok(v.body.includes('\n### AI review: 5 P0-P2 finding(s)\n'));
   // One reviewer's findings stay as it wrote them, however close.
   assert.deepEqual(listed(v), [
-    `- \`${proxy}:2446,2455\` Cache fill skips the singleflight and timeout on the request path`,
-    `- \`${store}:32\` New //nolint directive suppresses a lint finding`,
+    // A merged problem keeps the other reviewer's title, so a wrong merge hides nothing.
+    `- \`${proxy}:2446,2455\` Cache fill skips the singleflight and timeout on the request path (also reported as: Collapse concurrent cache misses)`,
+    `- \`${store}:32\` New //nolint directive suppresses a lint finding (also reported as: Remove the newly introduced lint suppression)`,
     `- \`${usage}:334\` Retry unknown usage before settling the order`,
     `- \`${usage}:330\` Report overdue jobs instead of discarding them`,
     `- \`${orders}:48\` Move the new orchestration into a domain service`,
@@ -99,6 +100,11 @@ test('different problems stay apart', () => {
     // Titles that share a word or two but name different problems.
     [at('internal/releases.go', 298, 'p2', 'Refresh the proxy cache after a release')],
     [at('internal/proxy.go', 2879, 'p2', 'Log proxy cache errors at warn level')],
+    // Short titles that share a word or two, in different files.
+    [at('internal/db.go', 40, 'p1', 'SQL injection')],
+    [at('cmd/run.go', 40, 'p1', 'Command injection')],
+    [at('internal/a.go', 12, 'p2', 'Unchecked error from Close')],
+    [at('internal/b.go', 12, 'p2', 'Unchecked error from Write')],
     // Nearby in different files.
     [at('internal/a.go', 12, 'p1', 'Nil map write')],
     [at('internal/b.go', 12, 'p1', 'Unchecked error')],
@@ -116,5 +122,19 @@ test('a problem holds at most one finding from each reviewer', () => {
     [at('internal/a.go', 10, 'p1', 'Nil map write'), at('internal/a.go', 25, 'p1', 'Unchecked error')],
     [at('internal/a.go', 15, 'p1', 'Map written before make')],
   );
-  assert.deepEqual(listed(v), ['- `internal/a.go:10,15` Nil map write', '- `internal/a.go:25` Unchecked error']);
+  assert.deepEqual(listed(v), [
+    '- `internal/a.go:10,15` Nil map write (also reported as: Map written before make)',
+    '- `internal/a.go:25` Unchecked error',
+  ]);
+});
+
+test('a finding joins the problem it fits best, by title and then by line', () => {
+  const v = both(
+    [at('internal/a.go', 10, 'p1', 'Nil map write'), at('internal/a.go', 28, 'p1', 'Unchecked error from Close')],
+    [at('internal/a.go', 14, 'p1', 'Unchecked error from Close'), at('internal/a.go', 9, 'p1', 'Nil map write')],
+  );
+  assert.deepEqual(listed(v), [
+    '- `internal/a.go:9,10` Nil map write',
+    '- `internal/a.go:14,28` Unchecked error from Close',
+  ]);
 });

@@ -83,7 +83,8 @@ const inlineComments = (reviewers) =>
     .filter((entry) => completed(entry.result, entry.review))
     .flatMap(({ name, model, review }) =>
       review.findings
-        .filter((f) => Number.isInteger(f.line) && f.line > 0)
+        // The author already answered a deferred P2, and the summary lists it.
+        .filter((f) => Number.isInteger(f.line) && f.line > 0 && !(severityOf(f) === 'p2' && f.deferred === true))
         .map((f) => ({ path: String(f.path), line: f.line, body: commentBody(f, model || name) })),
     );
 

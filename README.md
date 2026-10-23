@@ -46,14 +46,15 @@ single review that names no reviewer or provider, however many ran:
 - The comment lists and counts each problem once, by title. Findings from
   different reviewers within 20 lines of each other in one file, or with
   nearly the same title, are one problem, shown at the most severe level any
-  reviewer gave it, with every location. One reviewer's findings stay as it
-  wrote them. Each finding on a line also gets an inline comment that
+  reviewer gave it, with every location and the other reviewers' titles.
+  One reviewer's findings stay as it wrote them. Each finding on a line also gets an inline comment that
   explains why it matters, with a footer naming the model that found it, so
   two models reporting the same problem leave two comments.
-- Each round sees how people answered the last one. A finding the PR author
-  defers or declines with a reason, in the description, a commit message, or
-  a comment, becomes a question for the human review instead of failing the
-  verdict again, unless the code has since made it worse. A P0 still fails.
+- Each round sees how people answered the last one. A P2 finding the PR
+  author defers to named follow-up work, or declines with a concrete reason,
+  in the description or a comment, is listed for a person to decide instead
+  of failing the verdict again, unless the code has since made it worse. P0
+  and P1 findings still fail.
 - When a provider has an outage or its review otherwise does not complete, the
   other reviewers' verdict stands, and the run log warns which one is missing.
   When none completes, the verdict is an error and the head waits for a
@@ -89,9 +90,9 @@ person's review. It waits for one when:
   boundary (including a new third-party dependency, or CI or review
   configuration that gains access or weakens a check), breaks a contract
   others rely on, changes billing or pricing, does something its description
-  does not explain, carries a finding its author deferred or declined, or
-  could not be reviewed closely. No kind of file needs a person by itself;
-  simple, low-risk changes pass whatever they touch.
+  does not explain, or could not be reviewed closely. No kind of file needs a
+  person by itself; simple, low-risk changes pass whatever they touch.
+- The author deferred a P2 finding.
 - The change touches a path the repository lists in `human_review_paths`.
 - Someone adds the `needs-human-review` label.
 - The verdict was overridden, or the PR comes from a fork.
@@ -105,8 +106,9 @@ and what the reviews could not check, such as behavior only running the code
 shows. When the reviews found nothing blocking, each read the whole change
 closely, and each that asked for a person gave its own reasons, the comment
 says the code needs no second review for bugs, and the marker that ends it
-records `cleared`. It never says so for a path in `human_review_paths`, or for
-a PR labeled `needs-human-review` when the review publishes. The
+records `cleared`. It never says so for a deferred finding, a path in
+`human_review_paths`, or a PR labeled `needs-human-review` when the review
+publishes. The
 `guided-review` skill reads the marker, the labels, and `ai-review/human`, so a
 label added later still counts. It walks the reviewer through those decisions,
 runs `pr-review` only when the code is not cleared, and posts their answers,

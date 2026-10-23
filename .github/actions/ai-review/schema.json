@@ -14,7 +14,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["severity", "path", "line", "title", "detail"],
+        "required": ["severity", "path", "line", "title", "detail", "deferred"],
         "properties": {
           "severity": {
             "type": "string",
@@ -39,6 +39,10 @@
             "type": "string",
             "maxLength": 1500,
             "description": "Why it matters: what triggers the problem and its concrete result, and the fix when clear. A short Markdown paragraph with no headings."
+          },
+          "deferred": {
+            "type": "boolean",
+            "description": "True only for a p2 finding the PR author deferred or declined with a concrete reason, as the policy describes."
           }
         }
       }

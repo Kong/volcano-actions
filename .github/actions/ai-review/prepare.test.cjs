@@ -62,9 +62,9 @@ test('the policy is the shared review, with nothing one provider does', () => {
     'Set reviewed_closely',
     'reviewers.jsonl lists collaborators',
     'Check each\nearlier finding against the code at this head',
-    'defers an earlier finding to later work\nor declines it, and says why, the finding is a judgment call for a\nperson.',
-    'This does not apply to a p0,\nor to a deferral without a reason or by anyone else.',
-    '- carries a finding the author deferred or declined, as above;',
+    'Their latest answer\ncounts',
+    'Set\ndeferred to true on a finding you rank p2',
+    'including every p0 and p1, a finding answered\nwithout a concrete reason, and one answered by anyone else.',
   ]) {
     assert.ok(text.includes(part), part);
   }
@@ -97,7 +97,8 @@ test('the schema asks for what publish reads, and its variant only drops maxLeng
   assert.deepEqual(parsed.properties.human_review.required, ['needed', 'reasons', 'reviewer', 'reviewer_reason']);
   assert.equal(parsed.properties.summary.maxLength, 1500);
   const finding = parsed.properties.findings.items;
-  assert.deepEqual(finding.required, ['severity', 'path', 'line', 'title', 'detail']);
+  assert.deepEqual(finding.required, ['severity', 'path', 'line', 'title', 'detail', 'deferred']);
+  assert.equal(finding.properties.deferred.type, 'boolean');
   assert.equal(finding.properties.detail.type, 'string');
   assert.equal(finding.properties.detail.maxLength, 1500);
   assertStrict(parsed);
