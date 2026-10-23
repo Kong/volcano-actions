@@ -29,9 +29,8 @@ test("publish posts each completed review's findings on a line, signed by its mo
     ['Gemini', 'failure', reviewJson({ findings: [finding('p0')] }), '', 'gemini-3'],
   ]);
   assert.deepEqual(posted, [
-    ['internal/a.go', 12, opus],
+    ['internal/a.go', 12, `**🟠 P1:** Nil map write\n\n${why}\n\n<sub>Found by claude-opus-5-5 and Codex</sub>`],
     ['docs/a.md', 3, '**⚪ P3:** Typo @​kong/docs\n\n<sub>Found by claude-opus-5-5</sub>'],
-    ['internal/a.go', 12, `**🟠 P1:** Nil map write\n\n${why}\n\n<sub>Found by Codex</sub>`],
   ]);
   for (const comment of c.named('createReviewComment')) {
     assert.deepEqual([comment.pull_number, comment.commit_id, comment.side], [7, sha, 'RIGHT']);
@@ -39,7 +38,7 @@ test("publish posts each completed review's findings on a line, signed by its mo
   // The status and summary go first, so comments cannot delay or block them.
   const order = c.calls.map((call) => call.call);
   assert.ok(order.indexOf('createComment') < order.indexOf('listReviewComments'));
-  // The summary lists a problem two reviewers found once; each still comments.
+  // The summary lists a problem two reviewers found once, and it gets one comment.
   assert.deepEqual(c.set(statusContext)[0].slice(1), [
     'failure',
     '1 P0-P2 finding(s); 1 of 3 reviews did not complete. See the AI review comment.',
@@ -50,7 +49,7 @@ test("publish posts each completed review's findings on a line, signed by its mo
   );
 });
 
-test('every level reads as the reviewers label it, and long text is capped', async (t) => {
+test('every level reads as the reviewers label it, most severe first, and long text is capped', async (t) => {
   const levels = ['p0', 'p1', 'p2', 'p3', 'pre_existing'].map((s, i) => finding(s, { line: i + 1, title: 'x' }));
   const { posted } = await publishWith(t, [
     [
@@ -68,8 +67,8 @@ test('every level reads as the reviewers label it, and long text is capped', asy
       '**🟠 P1:** x',
       '**🟡 P2:** x',
       '**⚪ P3:** x',
-      '**🟣 Pre-existing:** x',
       `**⚪ P3:** ${'t'.repeat(199)}…`,
+      '**🟣 Pre-existing:** x',
     ],
   );
   assert.ok(posted[0][2].endsWith(`<sub>Found by ${'m'.repeat(99)}…</sub>`));

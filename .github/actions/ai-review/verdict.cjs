@@ -11,7 +11,7 @@ const {
   code,
   joinNames,
 } = require('./constants.cjs');
-const { cap, humanReasons, clearsCode, suggestedReviewer, severityOf, parsed, completed } = require('./reviews.cjs');
+const { cap, humanReasons, clearsCode, suggestedReviewer, shapeFinding, parsed, completed } = require('./reviews.cjs');
 const { problems } = require('./problems.cjs');
 
 const heading = 'AI review';
@@ -31,13 +31,7 @@ const listsFor = (count) =>
 function shape(review) {
   return {
     summary: cap(review.summary, 1500),
-    findings: review.findings.map((f) => ({
-      severity: severityOf(f),
-      path: cap(String(f.path), 300),
-      line: f.line,
-      title: cap(String(f.title), 200),
-      deferred: f.deferred === true,
-    })),
+    findings: review.findings.map((f) => shapeFinding(f)),
     notChecked: (Array.isArray(review.not_checked) ? review.not_checked : [])
       .filter((n) => typeof n === 'string' && n.trim())
       .map((n) => cap(n.trim(), 200)),

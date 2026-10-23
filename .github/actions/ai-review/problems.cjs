@@ -1,9 +1,10 @@
 'use strict';
 
 // Groups the findings of several reviewers into problems, so the verdict lists
-// and counts each problem once. Reviewers word and place one problem
-// differently: two models often report it a few lines apart under different
-// titles, or in different files under nearly the same title.
+// and counts each problem once, and each gets one inline comment. Reviewers
+// word and place one problem differently: two models often report it a few
+// lines apart under different titles, or in different files under nearly the
+// same title.
 
 const { severities, failing } = require('./constants.cjs');
 
@@ -101,29 +102,36 @@ function bestFor(groups, f) {
   return best?.group;
 }
 
+// A problem is deferred when each of its P0-P2 findings is a P2 the author
+// deferred (see policy.md); no other level can be.
+function deferred(group) {
+  const blocking = group.filter((m) => failing.has(m.severity));
+  return blocking.length > 0 && blocking.every((m) => m.severity === 'p2' && m.deferred === true);
+}
+
 // A problem as the summary shows it: its most severe finding's level and title,
 // the other reviewers' titles that say something else, so a wrong merge hides
-// nothing, and every location. It is deferred when each of its P0-P2 findings
-// is a P2 the author deferred (see policy.md); no other level can be.
+// nothing, every location, and whether it is deferred.
 function shown(group) {
   const titles = [group[0].title];
   for (const { title } of group.slice(1)) if (!titles.some((t) => similarTitles(t, title))) titles.push(title);
-  const blocking = group.filter((m) => failing.has(m.severity));
   return {
     severity: group[0].severity,
     title: titles[0],
     also: titles.slice(1),
     at: locations(group),
-    deferred: blocking.length > 0 && blocking.every((m) => m.severity === 'p2' && m.deferred === true),
+    deferred: deferred(group),
   };
 }
 
-// The problems in each reviewer's findings, given as one list per reviewer,
-// most severe first. A finding joins a problem with a finding from another
-// reviewer at most nearbyLines away in the same file, or with nearly the same
-// title, unless that problem already holds one of its own reviewer's: one
-// reviewer's findings stay as distinct as it wrote them.
-function problems(findingsByReviewer) {
+// The problems in each reviewer's findings, given as one list per reviewer:
+// each the findings it holds, most severe first, with `reviewer` set to their
+// reviewer's index, in order of their most severe. A finding joins a problem
+// with a finding from another reviewer at most nearbyLines away in the same
+// file, or with nearly the same title, unless that problem already holds one
+// of its own reviewer's: one reviewer's findings stay as distinct as it wrote
+// them.
+function grouped(findingsByReviewer) {
   const all = findingsByReviewer.flatMap((findings, reviewer) => findings.map((f) => ({ ...f, reviewer })));
   const groups = [];
   for (const f of all.toSorted((a, b) => levels.indexOf(a.severity) - levels.indexOf(b.severity))) {
@@ -131,7 +139,10 @@ function problems(findingsByReviewer) {
     if (group) group.push(f);
     else groups.push([f]);
   }
-  return groups.map((group) => shown(group));
+  return groups;
 }
 
-module.exports = { problems, similarTitles };
+// The problems as the summary shows them, in the same order.
+const problems = (findingsByReviewer) => grouped(findingsByReviewer).map((group) => shown(group));
+
+module.exports = { problems, grouped, deferred, similarTitles };

@@ -117,6 +117,16 @@ const severityOf = (f) =>
     .toLowerCase()
     .replaceAll(/[\s-]+/gu, '_');
 
+// A finding as the summary and the inline comments group it: its severity
+// normalized and its text at the schema's lengths.
+const shapeFinding = (f) => ({
+  severity: severityOf(f),
+  path: cap(String(f.path), 300),
+  line: f.line,
+  title: cap(String(f.title), 200),
+  deferred: f.deferred === true,
+});
+
 function parseReview(output) {
   try {
     return JSON.parse(output);
@@ -143,6 +153,7 @@ module.exports = {
   clearsCode,
   suggestedReviewer,
   severityOf,
+  shapeFinding,
   parsed,
   completed,
 };
