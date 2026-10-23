@@ -95,26 +95,34 @@ test('a deferred P2 gets no inline comment; any other finding still does', async
 });
 
 // An approval carries across pushes, but one given before the author deferred
-// a finding cannot have decided it.
-test('a deferred finding needs an approval of the reviewed commit itself', async (t) => {
+// a finding cannot have decided it, even of the same commit.
+test('a deferred finding needs an approval of the reviewed commit given since', async (t) => {
   useReviews(t, ['Claude', 'success', reviewJson({ findings: [deferred('p2')] }), '', 'claude-opus-5-5']);
-  const human = async (reviews) => {
-    const c = client({ reviews });
+  const approved = (commit, at) => ({ ...review('reviewer', 'APPROVED', 'User', commit), submitted_at: at });
+  const human = async (reviews, comments = []) => {
+    const c = client({ reviews, comments });
     await publish({ github: c.github, context: context(), core: core() });
     return { c, state: c.set(humanStatusContext).at(-1)[1] };
   };
-  const earlier = await human([review('reviewer', 'APPROVED', 'User', 'fedcba9876543210')]);
+  const later = '2999-01-01T00:00:00Z';
+  const earlier = await human([approved('fedcba9876543210', later)]);
   assert.equal(earlier.state, 'pending');
-  assert.equal((await human([review('reviewer', 'APPROVED')])).state, 'success');
+  assert.equal((await human([approved(sha, '2001-01-01T00:00:00Z')])).state, 'pending');
+  assert.equal((await human([approved(sha, later)])).state, 'success');
   assert.equal(earlier.c.set(statusContext)[0][1], 'success');
   const [{ body }] = earlier.c.named('createComment');
-  assert.match(body, /approve abcdef1 itself to accept them/u);
+  assert.match(body, /approve abcdef1 now to accept them/u);
+
+  // A re-run keeps the time the deferral was first reported.
+  const since = JSON.parse(Buffer.from(body.match(/<!-- ai-review-human (\S+) -->$/u)[1], 'base64')).since;
+  const rerun = await human([approved(sha, since)], [{ id: 2, user: { login: 'github-actions[bot]' }, body }]);
+  assert.equal(rerun.state, 'success');
 
   // The human gate reads the same rule back from the summary comment.
-  const later = client({
+  const gated = client({
     comments: [{ id: 2, user: { login: 'github-actions[bot]' }, body }],
-    reviews: [review('reviewer', 'APPROVED', 'User', 'fedcba9876543210')],
+    reviews: [approved(sha, '2001-01-01T00:00:00Z')],
   });
-  await gate({ github: later.github, context: context({ action: 'labeled' }), core: core() });
-  assert.equal(later.set(humanStatusContext).at(-1)[1], 'pending');
+  await gate({ github: gated.github, context: context({ action: 'labeled' }), core: core() });
+  assert.equal(gated.set(humanStatusContext).at(-1)[1], 'pending');
 });

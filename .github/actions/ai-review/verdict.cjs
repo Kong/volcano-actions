@@ -160,8 +160,8 @@ function verdict(reviewers, sha, url, candidates = []) {
     reviewer: suggestedReviewer(reviews, candidates),
     by: joinNames(done.map((entry) => entry.name)),
     missed,
-    // A person decides each deferral on this commit itself.
-    exact: deferredIn(shown.findings).length > 0,
+    // A person decides each deferral, after it was made (see publish).
+    deferred: deferredIn(shown.findings).length > 0,
   };
   const description = describe(failed, shown.findings, coverage);
   if (failed) {

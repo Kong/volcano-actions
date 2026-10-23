@@ -17,7 +17,8 @@ const calls = (run) => (run.referenced_workflows ?? []).map((w) => String(w.path
 async function reviewRuns(github, context, pull) {
   const { data: own } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.runId });
   const review = calls(own).find((path) => path.endsWith('/.github/workflows/ai-review.yml'));
-  if (!review) return { own, others: [] };
+  // Without it, the other runs are unknown.
+  if (!review) return { own, others: null };
   const { data } = await github.rest.actions.listWorkflowRunsForRepo({
     ...context.repo,
     branch: pull.head.ref,
@@ -43,7 +44,11 @@ const ran = (jobs, name) => jobs.some((job) => job.name.endsWith(`/ ${name}`) &&
 // Whether a run is applying the ai-review-override label: its override job
 // ran or will run. That job removes the label as it ends, so cancelling it
 // would leave the label on the PR, where adding it again fires no event.
-const overriding = async (github, context, run) => ran(await jobsOf(github, context, run), 'override');
+// A run whose jobs are not listed yet may be one.
+const overriding = async (github, context, run) => {
+  const jobs = await jobsOf(github, context, run);
+  return jobs.length === 0 || ran(jobs, 'override');
+};
 
 // Cancels the review runs of heads the PR has moved past, whose verdicts
 // nobody reads. Each head's runs share a concurrency group of their own (see
@@ -61,6 +66,7 @@ const overriding = async (github, context, run) => ran(await jobsOf(github, cont
 async function cancelSuperseded({ github, context, core }, pull) {
   const sha = context.payload.pull_request.head.sha;
   const { own, others } = await reviewRuns(github, context, pull);
+  if (!others) return;
   const older = others.filter((run) => run.head_sha !== sha && Date.parse(run.created_at) < Date.parse(own.created_at));
   const stale = [];
   for (const run of older) if (!(await overriding(github, context, run))) stale.push(run);
@@ -86,6 +92,7 @@ async function cancelSuperseded({ github, context, core }, pull) {
 async function abandoned(github, context, pull, sha) {
   try {
     const { others } = await reviewRuns(github, context, pull);
+    if (!others) return false;
     for (const run of others.filter((r) => r.head_sha === sha)) {
       const jobs = await jobsOf(github, context, run);
       if (jobs.length === 0 || ran(jobs, 'start')) return false;

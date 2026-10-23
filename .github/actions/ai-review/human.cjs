@@ -25,7 +25,7 @@ async function standing(github, context, pull) {
   const blockers = [];
   for (const [login, r] of latest) {
     if (r.state === 'DISMISSED' || !(await canWrite(github, context, login))) continue;
-    if (r.state === 'APPROVED') approvers.push({ login, commit: r.commit_id });
+    if (r.state === 'APPROVED') approvers.push({ login, commit: r.commit_id, at: r.submitted_at });
     else blockers.push(login);
   }
   const reviewed = reviews.some((r) => isOtherUser(r, pull));
@@ -58,12 +58,13 @@ function humanState({ approvers, blockers }, reasons) {
 }
 
 // An approval carries across pushes, as it does under the repositories'
-// required approvals today, none of which dismiss stale reviews. With `exact`,
-// as for a finding the author deferred, only an approval of this commit counts:
-// an earlier one predates the decision it would stand for.
-async function setHumanStatus(github, context, pull, sha, reasons, exact = false) {
+// required approvals today, none of which dismiss stale reviews. With `since`,
+// as for a finding the author deferred, only an approval of this commit given
+// after then counts: an earlier one predates the decision it would stand for.
+async function setHumanStatus(github, context, pull, sha, reasons, since = null) {
   const reviews = await standing(github, context, pull);
-  const counted = exact ? { ...reviews, approvers: reviews.approvers.filter((a) => a.commit === sha) } : reviews;
+  const after = (a) => a.commit === sha && Date.parse(a.at) >= Date.parse(since);
+  const counted = since ? { ...reviews, approvers: reviews.approvers.filter((a) => after(a)) } : reviews;
   const [state, description] = humanState(counted, reasons);
   await setStatus(github, context, sha, state, fit(description), humanStatusContext);
   await settleIncompleteReview(github, context, sha, reviews.approvers);

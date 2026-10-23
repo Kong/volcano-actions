@@ -134,6 +134,19 @@ async function postFindings({ github, context, core }, reviewers) {
   }
 }
 
+// When the review of this head first reported a deferred finding, kept across
+// re-runs. An approval before then cannot have decided it, even of this commit
+// (see human.cjs). An unread summary dates it now, which only asks for more.
+async function deferredSince(github, context, sha, deferred) {
+  if (!deferred) return null;
+  try {
+    const stored = storedDecision(await summaryComment(github, context, context.payload.pull_request.number), sha);
+    return stored?.since ?? new Date().toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
 // Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
 // head, then the summary comment, then each review's inline comments.
 async function publish({ github, context, core }) {
@@ -166,12 +179,13 @@ async function publish({ github, context, core }) {
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
   const paths = await pathReasons(github, context, pr.number);
-  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer, exact: Boolean(result.exact) };
+  const since = await deferredSince(github, context, pr.head.sha, result.deferred);
+  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer, since };
   let live = null;
   try {
     live = await liveReasons(github, context, pull, pr.head.sha);
     const reasons = [...decision.reasons, ...live];
-    const gate = await setHumanStatus(github, context, pull, pr.head.sha, reasons, decision.exact);
+    const gate = await setHumanStatus(github, context, pull, pr.head.sha, reasons, since);
     await requestReviewer(github, context, core, pull, pr.head.sha, gate, decision.reviewer);
   } catch (error) {
     core.setFailed(`The verdict is published, but the human review status failed: ${error.message}`);
@@ -219,7 +233,7 @@ async function override({ github, context, core }) {
     overriddenBy(sender.login),
     ...(await liveReasons(github, context, pull, pr.head.sha)),
   ];
-  const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], stored?.exact);
+  const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], stored?.since);
   await setStatus(github, context, pr.head.sha, 'success', overriddenBy(sender.login));
   await removeOverrideLabel(github, context);
   await requestReviewer(github, context, core, pull, pr.head.sha, gate, stored?.reviewer);
@@ -253,7 +267,7 @@ async function gate({ github, context, core }) {
       continue;
     }
     const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
-    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], stored?.exact);
+    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], stored?.since);
     await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
   }
 }

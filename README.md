@@ -101,9 +101,9 @@ person's review. It waits for one when:
 It passes when none applies, or once a collaborator with write access other
 than the author approves. Like the repositories' required approvals today, an
 approval carries across later pushes, except past a P2 the author deferred:
-then only an approval of that commit counts. Changes requested by a
-collaborator with write access hold it until they approve or their review is
-dismissed.
+then only an approval of that commit given after the review reported the
+deferral counts. Changes requested by a collaborator with write access hold it
+until they approve or their review is dismissed.
 The summary comment lists each reason as a question for the person to decide,
 and what the reviews could not check, such as behavior only running the code
 shows. When the reviews found nothing blocking, each read the whole change

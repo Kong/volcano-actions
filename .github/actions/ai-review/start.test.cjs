@@ -118,7 +118,7 @@ const run = (id, head, overrides = {}) => ({
 // A client whose Actions API reports this run (9) as created at noon in
 // workflow 77, which calls the review, lists `runs` on the PR's branch, and
 // answers each cancel with `cancel`'s [message, status] or success.
-function withRuns(options, runs, { cancel = () => null, failRun = false } = {}) {
+function withRuns(options, runs, { cancel = () => null, failRun = false, calls = review } = {}) {
   const c = client(options);
   // Like an Octokit method, a throw rejects the promise.
   const answer = (call, fn) => (args) =>
@@ -138,7 +138,7 @@ function withRuns(options, runs, { cancel = () => null, failRun = false } = {}) 
               id: args.run_id,
               workflow_id: 77,
               created_at: '2026-10-23T12:00:00Z',
-              referenced_workflows: review,
+              referenced_workflows: calls,
             },
           },
     ),
@@ -165,6 +165,8 @@ test("the live head's review cancels the unfinished review runs of heads the PR 
     // the override label removes it as it ends, so it runs to the end.
     run(8, older, { workflow_id: 78 }),
     run(12, older, { workflow_id: 78, jobs: [{ name: 'retarget-or-override / override', conclusion: null }] }),
+    // A queued run that has not listed its jobs may be an override.
+    run(14, older, { workflow_id: 78, status: 'queued', jobs: [] }),
     // Other workflows on the branch, including the caller's own workflow when
     // a run calls nothing else, and the human gate.
     run(10, older, { workflow_id: 79, referenced_workflows: [] }),
@@ -245,5 +247,8 @@ test('a reopen reviews a head whose pending verdict no run is still working on',
   ];
   assert.equal(await reopen(withRuns(pending, [run(1, sha, { workflow_id: 78, jobs: override })])), 'true');
   assert.equal(await reopen(withRuns(pending, [], { failRun: true })), 'false');
+  // When this run does not show which workflow reviews, the others are unknown.
+  const unknown = withRuns(pending, [run(1, older)], { calls: [] });
+  assert.equal(await reopen(unknown), 'false');
   assert.equal(await reopen(withRuns({ statuses: [{ context: statusContext, state: 'failure' }] }, [])), 'false');
 });
