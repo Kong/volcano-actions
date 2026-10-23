@@ -7,10 +7,37 @@ const { setStatus, verdictState, canWrite, livePull } = require('./github.cjs');
 // concurrency group or an approval.
 const unfinished = new Set(['requested', 'queued', 'pending', 'waiting', 'in_progress']);
 
-// Cancels this workflow's runs that review a head the PR has moved past, whose
-// verdicts nobody reads. Each head's runs share a concurrency group of their
-// own (see ai-review.yml), so a push never cancels them by itself. start()
-// calls this only from a run reviewing the PR's live head.
+// The reusable workflows a run calls, without their refs.
+const calls = (run) => (run.referenced_workflows ?? []).map((w) => String(w.path).split('@')[0]);
+
+// This run, and the other unfinished runs of the review on the PR's branch in
+// this repository: those of this workflow, and of any other caller workflow
+// that calls the same review, as the retarget-and-override stub does. Needs
+// `actions: read`.
+async function reviewRuns(github, context, pull) {
+  const { data: own } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.runId });
+  const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+    ...context.repo,
+    branch: pull.head.ref,
+    event: 'pull_request_target',
+    per_page: 100,
+  });
+  const repo = `${context.repo.owner}/${context.repo.repo}`;
+  const review = calls(own);
+  const others = data.workflow_runs.filter(
+    (run) =>
+      run.id !== own.id &&
+      unfinished.has(run.status) &&
+      run.head_repository?.full_name === repo &&
+      (run.workflow_id === own.workflow_id || calls(run).some((path) => review.includes(path))),
+  );
+  return { own, others };
+}
+
+// Cancels the review runs of heads the PR has moved past, whose verdicts
+// nobody reads. Each head's runs share a concurrency group of their own (see
+// ai-review.yml), so a push never cancels them by itself. start() calls this
+// only from a run reviewing the PR's live head.
 //
 // A run for the live head must never be cancelled. GitHub does not create runs
 // in event order, and the PR read can lag a push, so this cancels only runs
@@ -22,23 +49,8 @@ const unfinished = new Set(['requested', 'queued', 'pending', 'waiting', 'in_pro
 // would without this.
 async function cancelSuperseded({ github, context, core }, pull) {
   const sha = context.payload.pull_request.head.sha;
-  const repo = `${context.repo.owner}/${context.repo.repo}`;
-  const { data: own } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.runId });
-  const { data } = await github.rest.actions.listWorkflowRuns({
-    ...context.repo,
-    workflow_id: own.workflow_id,
-    branch: pull.head.ref,
-    event: 'pull_request_target',
-    per_page: 100,
-  });
-  const stale = data.workflow_runs.filter(
-    (run) =>
-      run.id !== own.id &&
-      unfinished.has(run.status) &&
-      run.head_sha !== sha &&
-      run.head_repository?.full_name === repo &&
-      Date.parse(run.created_at) < Date.parse(own.created_at),
-  );
+  const { own, others } = await reviewRuns(github, context, pull);
+  const stale = others.filter((run) => run.head_sha !== sha && Date.parse(run.created_at) < Date.parse(own.created_at));
   if (stale.length === 0) return;
   // The PR moved on while this run looked; the newer head's run cancels.
   if ((await livePull(github, context)).head.sha !== sha) return;
@@ -50,6 +62,18 @@ async function cancelSuperseded({ github, context, core }, pull) {
       // 409: the run finished first.
       if (error.status !== 409) core.warning(`Could not cancel run ${run.id}: ${error.message}`);
     }
+  }
+}
+
+// Whether a pending verdict was left by a review that no longer runs, such as
+// one cancelled when the PR moved past its head, before the PR returned to it.
+// When the runs cannot be listed, it may still run.
+async function abandoned(github, context, pull, sha) {
+  try {
+    const { others } = await reviewRuns(github, context, pull);
+    return !others.some((run) => run.head_sha === sha);
+  } catch {
+    return false;
   }
 }
 
@@ -76,7 +100,8 @@ async function start({ github, context, core }) {
   // re-run replays the reopen and finds its own first attempt's verdict.
   if (context.payload.action === 'reopened' && context.runAttempt === 1) {
     const state = await verdictState(github, context, sha);
-    if (state !== 'none') return skip(`it already has a ${state} verdict.`);
+    const left = state === 'pending' && (await abandoned(github, context, pull, sha));
+    if (state !== 'none' && !left) return skip(`it already has a ${state} verdict.`);
   }
   // The action refuses users without write access (bots go through its
   // allowed_bots), which would replace this SHA's verdict with an error, for

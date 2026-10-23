@@ -98,18 +98,22 @@ test('start decides draft by the live PR, not the payload', async () => {
 });
 
 const older = '1234567890abcdef';
+const review = [{ path: 'Kong/volcano-actions/.github/workflows/ai-review.yml@main', sha: 'abc' }];
+// A review run of the caller's review workflow, 77, created before this one.
 const run = (id, head, overrides = {}) => ({
   id,
   head_sha: head,
   status: 'in_progress',
   created_at: '2026-10-23T11:00:00Z',
+  workflow_id: 77,
+  referenced_workflows: review,
   head_repository: { full_name: 'Kong/volcano-hosting' },
   ...overrides,
 });
 
 // A client whose Actions API reports this run (9) as created at noon in
-// workflow 77, lists `runs` on the PR's branch, and answers each cancel with
-// `cancel`'s [message, status] or success.
+// workflow 77, which calls the review, lists `runs` on the PR's branch, and
+// answers each cancel with `cancel`'s [message, status] or success.
 function withRuns(options, runs, { cancel = () => null, failRun = false } = {}) {
   const c = client(options);
   // Like an Octokit method, a throw rejects the promise.
@@ -125,16 +129,23 @@ function withRuns(options, runs, { cancel = () => null, failRun = false } = {}) 
     getWorkflowRun: answer('getWorkflowRun', (args) =>
       failRun
         ? fail(['Resource not accessible by integration', 403])
-        : { data: { id: args.run_id, workflow_id: 77, created_at: '2026-10-23T12:00:00Z' } },
+        : {
+            data: {
+              id: args.run_id,
+              workflow_id: 77,
+              created_at: '2026-10-23T12:00:00Z',
+              referenced_workflows: review,
+            },
+          },
     ),
-    listWorkflowRuns: answer('listWorkflowRuns', () => ({ data: { workflow_runs: runs } })),
+    listWorkflowRunsForRepo: answer('listWorkflowRunsForRepo', () => ({ data: { workflow_runs: runs } })),
     cancelWorkflowRun: answer('cancelWorkflowRun', (args) => (cancel(args) ? fail(cancel(args)) : { data: {} })),
   };
   return c;
 }
 const cancelled = (c) => c.named('cancelWorkflowRun').map((call) => call.run_id);
 
-test("the live head's review cancels this workflow's unfinished runs for heads the PR has moved past", async () => {
+test("the live head's review cancels the unfinished review runs of heads the PR has moved past", async () => {
   const c = withRuns({}, [
     run(1, older),
     run(2, older, { status: 'queued' }),
@@ -143,16 +154,24 @@ test("the live head's review cancels this workflow's unfinished runs for heads t
     run(5, older, { created_at: '2026-10-23T12:00:01Z' }),
     run(6, older, { head_repository: { full_name: 'fork/volcano-hosting' } }),
     run(7, older, { status: 'waiting' }),
+    // The retarget-and-override stub calls the same review.
+    run(8, older, { workflow_id: 78 }),
+    // Other workflows on the branch, including the human gate.
+    run(10, older, { workflow_id: 79, referenced_workflows: [] }),
+    run(11, older, {
+      workflow_id: 80,
+      referenced_workflows: [{ path: 'Kong/volcano-actions/.github/workflows/ai-review-human.yml@main' }],
+    }),
     run(9, sha),
   ]);
   const k = core();
   await start({ github: c.github, context: context(), core: k });
   assert.deepEqual(k.outputs, { review: 'true' });
   assert.deepEqual(
-    c.named('listWorkflowRuns').map(({ workflow_id, branch, event }) => [workflow_id, branch, event]),
-    [[77, 'feature', 'pull_request_target']],
+    c.named('listWorkflowRunsForRepo').map(({ branch, event }) => [branch, event]),
+    [['feature', 'pull_request_target']],
   );
-  assert.deepEqual(cancelled(c), [1, 2, 7]);
+  assert.deepEqual(cancelled(c), [1, 2, 7, 8]);
   assert.ok(k.notices.includes('Cancelled run 1, which reviews 1234567, a head this PR has moved past.'));
   // The head is marked under review first.
   const order = c.calls.map((call) => call.call);
@@ -193,4 +212,19 @@ test('a failed cancel only warns, and the review goes ahead', async () => {
   assert.deepEqual(cancelled(partial), [1, 2, 3]);
   assert.deepEqual(p.warnings, ['Could not cancel run 2: Server Error']);
   assert.ok(p.notices.includes('Cancelled run 3, which reviews 1234567, a head this PR has moved past.'));
+});
+
+// Cancelling a review leaves its head pending. If the PR returns to that head
+// while closed, its reopen must review it rather than wait on nothing.
+test('a reopen reviews a head whose pending verdict no run is still working on', async () => {
+  const pending = { statuses: [{ context: statusContext, state: 'pending' }] };
+  const reopen = async (c) => {
+    const k = core();
+    await start({ github: c.github, context: context({ action: 'reopened' }), core: k });
+    return k.outputs.review;
+  };
+  assert.equal(await reopen(withRuns(pending, [run(1, older)])), 'true');
+  assert.equal(await reopen(withRuns(pending, [run(1, sha)])), 'false');
+  assert.equal(await reopen(withRuns(pending, [], { failRun: true })), 'false');
+  assert.equal(await reopen(withRuns({ statuses: [{ context: statusContext, state: 'failure' }] }, [])), 'false');
 });
