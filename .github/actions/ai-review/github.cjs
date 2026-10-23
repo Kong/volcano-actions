@@ -77,7 +77,14 @@ async function liveReasons(github, context, pull, sha) {
   return reasons;
 }
 
+// A re-run keeps its original event, so an older run would review obsolete
+// code and overwrite the summary comment with a stale result.
+async function isLiveHead(github, context) {
+  return (await livePull(github, context)).head.sha === context.payload.pull_request.head.sha;
+}
+
 module.exports = {
+  isLiveHead,
   setStatus,
   removeOverrideLabel,
   isSummary,

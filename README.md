@@ -8,8 +8,9 @@ Shared GitHub Actions and reusable workflows for Volcano repositories. The
 
 `.github/workflows/ai-review.yml` reviews each push to a same-repository pull
 request with several AI reviewers and reports one `ai-review/verdict` commit
-status on the reviewed head. P0-P2 findings fail it; a human collaborator with
-write or admin access, including the PR author, can accept one head with the
+status on the reviewed head. P0-P2 findings fail it, except a P2 the author
+deferred, which goes to a person. A human collaborator with write or admin
+access, including the PR author, can accept one head with the
 `ai-review-override` label. This includes fork PRs, which the AI review does
 not run on. The label is removed after processing. Each new commit needs its
 own override. Volcano repositories call it instead of keeping their own copy,
@@ -41,8 +42,8 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 One verdict combines every reviewer, and the summary comment reads as a
 single review that names no reviewer or provider, however many ran:
 
-- A P0-P2 finding from any reviewer fails it. Any reviewer can ask for a
-  person.
+- A P0-P2 finding from any reviewer fails it, unless it is a P2 the author
+  deferred (see below). Any reviewer can ask for a person.
 - The comment lists and counts each problem once, by title. Findings from
   different reviewers within 20 lines of each other in one file, or with
   nearly the same title, are one problem, shown at the most severe level any
@@ -103,8 +104,9 @@ than the author approves. Like the repositories' required approvals today, an
 approval carries across later pushes, except past a P2 the author deferred:
 then only an approval of that commit given after the review reported the
 deferral counts. A re-run of the commit keeps that time unless it defers a
-finding the last review did not. Changes requested by a collaborator with write access hold it
-until they approve or their review is dismissed.
+problem the last review did not, by title and location. Changes requested by a
+collaborator with write access hold it until they approve or their review is
+dismissed.
 The summary comment lists each reason as a question for the person to decide,
 and what the reviews could not check, such as behavior only running the code
 shows. When the reviews found nothing blocking, each read the whole change

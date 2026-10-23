@@ -10,7 +10,7 @@ const { clean, code } = require('./constants.cjs');
 // skill, whether the comment says the code needs no second review. `since`,
 // when the review of this commit first reported a deferred finding, says only
 // an approval of this commit given after then counts, and `deferred` names the
-// findings it covers.
+// problems it covers, each by its title and locations.
 const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null, deferred = [] }) =>
   `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since, deferred })).toString('base64')} -->`;
 

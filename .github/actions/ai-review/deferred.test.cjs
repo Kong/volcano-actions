@@ -130,19 +130,21 @@ test('a deferred finding needs an approval of the reviewed commit given since', 
 });
 
 // A re-run of a commit keeps the time of its deferral only when it defers
-// nothing new; otherwise an approval given before it asks that person again.
-test('a re-run that defers another finding needs a new approval', async (t) => {
+// nothing new, by title and location; otherwise an approval given before it
+// asks that person again.
+test('a re-run that defers another problem needs a new approval', async (t) => {
   const title = 'Move orchestration into a domain service';
-  const summary = (deferredTitles) => ({
+  const stored = [`${title} @ internal/a.go:12`];
+  const summary = (deferredProblems) => ({
     id: 2,
     user: { login: 'github-actions[bot]' },
-    body: `${marker}\n### AI review\n\n${decisionMarker(sha, { reasons: [question], reviewer: null, since: '2001-01-01T00:00:00Z', deferred: deferredTitles })}`,
+    body: `${marker}\n### AI review\n\n${decisionMarker(sha, { reasons: [question], reviewer: null, since: '2001-01-01T00:00:00Z', deferred: deferredProblems })}`,
   });
-  const rerun = async (findings, stored) => {
+  const rerun = async (findings, deferredProblems) => {
     useReviews(t, ['Claude', 'success', reviewJson({ findings }), '', 'claude-opus-5-5']);
     const c = client({
       reviews: [{ ...review('reviewer', 'APPROVED'), submitted_at: '2002-01-01T00:00:00Z' }],
-      comments: [summary(stored)],
+      comments: [summary(deferredProblems)],
     });
     await publish({ github: c.github, context: context(), core: core() });
     const [{ body }] = c.named('updateComment');
@@ -153,14 +155,30 @@ test('a re-run that defers another finding needs a new approval', async (t) => {
       asked: c.named('requestReviewers').map((r) => r.reviewers),
     };
   };
-  const same = await rerun([deferred('p2')], [title]);
+  const same = await rerun([deferred('p2')], stored);
   assert.deepEqual(same, { state: 'success', since: '2001-01-01T00:00:00Z', asked: [] });
-  const another = [deferred('p2'), deferred('p2', { path: 'internal/b.go', title: 'Unchecked error from Close' })];
-  for (const stored of [[title], []]) {
-    const added = await rerun(another, stored);
-    assert.equal(added.state, 'pending');
-    assert.ok(Date.parse(added.since) > Date.parse('2002-01-01T00:00:00Z'));
+  for (const [why, findings, before] of [
+    ['another problem', [deferred('p2'), deferred('p2', { path: 'internal/b.go', title: 'Unchecked error' })], stored],
+    ['a second problem under the same title', [deferred('p2'), deferred('p2', { path: 'internal/c.go' })], stored],
+    ['the problem elsewhere', [deferred('p2', { line: 40 })], stored],
+    ['a summary that names none', [deferred('p2')], []],
+  ]) {
+    const added = await rerun(findings, before);
+    assert.equal(added.state, 'pending', why);
+    assert.ok(Date.parse(added.since) > Date.parse('2002-01-01T00:00:00Z'), why);
     // The approver whose approval no longer counts is asked again.
-    assert.deepEqual(added.asked, [['reviewer']]);
+    assert.deepEqual(added.asked, [['reviewer']], why);
   }
+});
+
+// The deferral dates from just before the summary reports it, and the human
+// status follows the summary, so nobody approves before they could read it.
+test('the human status is set after the summary reports a deferral', async (t) => {
+  useReviews(t, ['Claude', 'success', reviewJson({ findings: [deferred('p2')] }), '', 'claude-opus-5-5']);
+  const c = client();
+  await publish({ github: c.github, context: context(), core: core() });
+  const order = c.calls
+    .filter((call) => call.call === 'createComment' || call.context === humanStatusContext)
+    .map((call) => call.call);
+  assert.deepEqual(order, ['createComment', 'createCommitStatus']);
 });
