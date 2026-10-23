@@ -91,6 +91,19 @@ test('only events for one head share a review run group', () => {
   assert.doesNotMatch(workflow.split('\njobs:\n')[1], /concurrency:/u);
 });
 
+// start() cancels the runs of heads the PR has moved past; no other job holds
+// that power.
+test('only start can cancel runs', () => {
+  const jobs = jobsOf(reviewWorkflow());
+  assert.match(
+    jobs.start,
+    /\n {4}permissions:\n(?: {6}#.*\n)* {6}actions: write\n {6}contents: read\n {6}pull-requests: read\n {6}statuses: write\n/u,
+  );
+  for (const [name, job] of Object.entries(jobs)) {
+    if (name !== 'start') assert.doesNotMatch(job, /\n {6}actions: /u, name);
+  }
+});
+
 test('jobs with a write token never check out the PR, and Claude reads it with no shell', () => {
   const jobs = jobsOf(reviewWorkflow());
   // The jobs holding a write token load the script from this repository's
@@ -200,7 +213,9 @@ test('the pinned action reads the output each reviewer job uploads', async (t) =
   for (const name of reviewerJobs(jobs)) {
     const upload = stepText(jobs[name], 'actions/upload-artifact@');
     const file = upload.match(/\n {10}path: \$\{\{ runner\.temp \}\}\/(\S+)\n/u)[1];
-    fs.writeFileSync(path.join(dir, file), reviewJson({ findings: [finding('p3', { title: name })] }));
+    // Each in its own file, so the verdict counts them apart.
+    const own = finding('p3', { title: name, path: `internal/${name}.go` });
+    fs.writeFileSync(path.join(dir, file), reviewJson({ findings: [own] }));
     needs[name] = { result: 'success', outputs: { reviewer: name } };
   }
   clearAfter(t, 'REVIEWS', 'REVIEW_OUTPUTS');

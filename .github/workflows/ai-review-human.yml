@@ -41,6 +41,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
+      - uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
         with:
           step: gate
