@@ -43,10 +43,13 @@ single review that names no reviewer or provider, however many ran:
 
 - A P0-P2 finding from any reviewer fails it. Any reviewer can ask for a
   person.
-- The comment lists every reviewer's findings once, by title. Each finding on
-  a line also gets an inline comment that explains why it matters, with a
-  footer naming the model that found it, so two models reporting the same
-  problem leave two comments.
+- The comment lists and counts each problem once, by title. Findings from
+  different reviewers within 20 lines of each other in one file, or with
+  nearly the same title, are one problem, shown at the most severe level any
+  reviewer gave it, with every location. One reviewer's findings stay as it
+  wrote them. Each finding on a line also gets an inline comment that
+  explains why it matters, with a footer naming the model that found it, so
+  two models reporting the same problem leave two comments.
 - Each round sees how people answered the last one. A finding the PR author
   defers or declines with a reason, in the description, a commit message, or
   a comment, becomes a question for the human review instead of failing the

@@ -48,10 +48,10 @@ test('a P0-P2 finding from either review fails the verdict, counted once however
   for (const [claude, codex, n] of [
     [[finding('p1')], [finding('p3')], 1],
     [[finding('p3')], [finding('p0')], 1],
-    [[finding('p2')], [finding('p2', { title: 'Unchecked error' })], 2],
+    [[finding('p2')], [finding('p2', { line: 40, title: 'Unchecked error' })], 2],
     [[finding('p1')], [finding('p1', { title: ' nil MAP write ' })], 1],
-    // Only exact repeats drop, so the same problem at two severities stays twice.
-    [[finding('p1')], [finding('p2')], 2],
+    // The same problem at two levels counts once, at the more severe.
+    [[finding('p1')], [finding('p2')], 1],
   ]) {
     const v = both({ findings: claude }, { findings: codex });
     assert.equal(v.state, 'failure', JSON.stringify([claude, codex]));

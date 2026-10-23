@@ -12,6 +12,7 @@ const {
   joinNames,
 } = require('./constants.cjs');
 const { cap, humanReasons, clearsCode, suggestedReviewer, severityOf, parsed, completed } = require('./reviews.cjs');
+const { problems } = require('./problems.cjs');
 
 const heading = 'AI review';
 const noneCompleted = 'No AI review completed.';
@@ -42,31 +43,16 @@ function shape(review) {
   };
 }
 
-const sameProblem = (f) =>
-  JSON.stringify([
-    f.severity,
-    f.path,
-    f.line,
-    f.title
-      .toLowerCase()
-      .replaceAll(/\s+/gu, ' ')
-      .replace(/[\s.!]+$/u, '')
-      .trim(),
-  ]);
-
-// Several reviews as one: every finding without exact repeats, and every gap.
-// The summary is the first review's, or, when any review blocks, the first
-// blocking review's, so its risk call agrees with the heading.
+// Every review as one: each problem once, however many reviewers reported it
+// (see problems.cjs), and every gap. The summary is the first review's, or,
+// when any review blocks, the first blocking review's, so its risk call agrees
+// with the heading.
 function union(reviews) {
   const shaped = reviews.map((r) => shape(r));
-  const findings = new Map();
-  for (const f of shaped.flatMap((r) => r.findings)) {
-    if (!findings.has(sameProblem(f))) findings.set(sameProblem(f), f);
-  }
   const blocks = shaped.find((r) => r.findings.some((f) => failing.has(f.severity)));
   return {
     summary: (blocks ?? shaped[0]).summary,
-    findings: [...findings.values()],
+    findings: problems(shaped.map((r) => r.findings)),
     notChecked: shaped.flatMap((r) => r.notChecked),
   };
 }
@@ -92,10 +78,11 @@ function incompleteVerdict(short, url, candidates, missed) {
 
 const blockingIn = (findings) => findings.filter((f) => failing.has(f.severity));
 
-// The comment's findings, most severe first, and what the review could not
-// check, all from the one review it shows.
+// The comment's problems, most severe first, and what the reviews could not
+// check.
 function findingsBody({ shown, failed, notChecked, short, url, coverage }) {
-  const item = (f) => `- ${code(f.line > 0 ? `${f.path}:${f.line}` : f.path)} ${clean(f.title)}`;
+  const where = (p) => p.at.map(({ path, lines }) => code(lines.length > 0 ? `${path}:${lines.join(',')}` : path));
+  const item = (p) => `- ${where(p).join(', ')} ${clean(p.title)}`;
   const body = [
     marker,
     failed
@@ -114,7 +101,7 @@ function findingsBody({ shown, failed, notChecked, short, url, coverage }) {
   return body;
 }
 
-// Counts the findings the comment shows, so the status and comment agree.
+// Counts the problems the comment shows, so the status and comment agree.
 function describe(failed, findings, coverage) {
   const also = coverage && `; ${coverage}`;
   if (failed) return fit(`${blockingIn(findings).length} P0-P2 finding(s)${also}. See the ${heading} comment.`);
@@ -143,7 +130,7 @@ function verdict(reviewers, sha, url, candidates = []) {
   const reviews = done.map((entry) => entry.review);
   const blocking = reviews.flatMap((r) => r.findings).filter((f) => failing.has(severityOf(f)));
   const failed = blocking.length > 0;
-  const shown = reviews.length === 1 ? shape(reviews[0]) : union(reviews);
+  const shown = union(reviews);
   const coverage = coverageOf(missed, entries.length);
   const body = findingsBody({ shown, failed, notChecked: list([shown.notChecked]), short, url, coverage });
   const decision = {
