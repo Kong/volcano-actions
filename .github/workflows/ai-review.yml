@@ -3,9 +3,10 @@
 # every push to a same-repository PR, and one verdict combines them as the
 # `ai-review/verdict` commit status on the reviewed head. Findings are ranked
 # P0-P3, as Codex review ranks them; a P0-P2 finding from any reviewer fails
-# it. It also reports `ai-review/human`, which waits for a person's approval
-# when a reviewer, a reserved path, the needs-human-review label, an override,
-# or a fork calls for one, and passes otherwise. A repository that requires it
+# it, unless it is a P2 the author deferred. It also reports `ai-review/human`,
+# which waits for a person's approval when a reviewer, a deferral, a reserved
+# path, the needs-human-review label, an override, or a fork calls for one, and
+# passes otherwise. A repository that requires it
 # can drop its required approvals. When it waits, the review asks one
 # collaborator by name: the first reviewer's pick among those with recent
 # history in the changed files. ai-review-human.yml re-sets it when reviews or
@@ -90,10 +91,12 @@ permissions: {}
 # in progress. GitHub does not guarantee runs enter a group in event order, so
 # a run never shares a group with another head's: a stale run could cancel the
 # live head's review and then skip, leaving the head without a verdict.
-# start() skips a head the PR has moved past. Other events (labels, edits,
-# reopens, which a triage user can send) get their own group so they never
-# cancel a review in progress. A re-run waits rather than cancelling the
-# current head's review.
+# start() skips a head the PR has moved past, and the live head's run cancels
+# the runs of heads it replaced: only runs created before its own, and only
+# while its head is still the PR's. Other events (labels, edits, reopens,
+# which a triage user can send) get their own group so they never cancel a
+# review in progress. A re-run waits rather than cancelling the current head's
+# review.
 concurrency:
   group: ai-review-${{ (contains(fromJSON('["opened","synchronize","ready_for_review"]'), github.event.action) || (github.event.action == 'edited' && github.event.changes.base)) && format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || github.run_id }}
   cancel-in-progress: ${{ github.run_attempt == 1 }}
@@ -110,6 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      # Cancels this workflow's runs for heads the PR has moved past.
+      actions: write
       contents: read
       pull-requests: read
       statuses: write
@@ -118,7 +123,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
+        uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
         with:
           step: start
 
@@ -165,7 +170,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
+        uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -284,7 +289,7 @@ jobs:
           persist-credentials: true
       # Writes the same inputs as the claude job, before the credentials go.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
+        uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -396,7 +401,7 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
+      - uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
@@ -416,6 +421,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@9c7d43a563022670539d530622c100f7db57e62e
+      - uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
         with:
           step: override
