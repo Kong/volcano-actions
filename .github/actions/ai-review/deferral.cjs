@@ -3,10 +3,12 @@
 const { storedDecision } = require('./decision.cjs');
 const { summaryComment } = require('./github.cjs');
 
-// A deferred P2 passes the verdict only once a person approves the reviewed
-// commit after the summary reported the deferral (see human.cjs). `since`, in
-// the summary's marker, is when GitHub recorded the summary that first did:
-// an approval given before then cannot have decided it.
+// A deferred P2 passes `ai-review/verdict` once the summary records the
+// deferral and `ai-review/human` has been set from it (see publish). The human
+// status, not the verdict, waits for a person: it needs an approval of the
+// reviewed commit given after `since`, in the summary's marker, which is when
+// GitHub recorded the summary that first reported the deferral (see
+// human.cjs). An approval given before then cannot have decided it.
 
 // Whether every deferred problem, given by its key (see problems.cjs), is one
 // of the stored ones, counting repeats.
