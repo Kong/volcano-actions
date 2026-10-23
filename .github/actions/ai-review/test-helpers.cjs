@@ -93,8 +93,6 @@ const clientDefaults = () => ({
   draft: false,
   failComments: false,
   reviews: [],
-  files: [],
-  failFiles: false,
   labels: [],
   headRepo: 'Kong/volcano-hosting',
   open: [],
@@ -142,7 +140,6 @@ const pullsApi = (o, record) => ({
   get: record('getPull', (args) => ({ data: livePull(o, args.pull_number) })),
   list: record('listPulls', () => ({ data: o.open })),
   listReviews: () => {},
-  listFiles: () => {},
   listReviewComments: () => {},
   createReviewComment: record('createReviewComment', (args) => {
     const rejection = o.rejectComment(args);
@@ -172,7 +169,7 @@ const reposApi = (o, record) => ({
   }),
 });
 
-// Lists reviews, files, review comments, or, for any other method, comments.
+// Lists reviews, review comments, or, for any other method, comments.
 function paginator(o, rest, calls) {
   const list = (call, items, failure) => (args) => {
     calls.push({ ...args, call });
@@ -181,7 +178,6 @@ function paginator(o, rest, calls) {
   };
   const lists = new Map([
     [rest.pulls.listReviews, list('listReviews', o.reviews, o.failReviews && ['Server Error', 500])],
-    [rest.pulls.listFiles, list('listFiles', o.files, o.failFiles && ['Server Error', 500])],
     [
       rest.pulls.listReviewComments,
       list('listReviewComments', o.reviewComments, o.failReviewComments && ['Server Error', 500]),

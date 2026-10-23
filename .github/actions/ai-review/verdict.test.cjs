@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { marker, verdict, globRegExp } = require('./ai-review.cjs');
+const { marker, verdict } = require('./ai-review.cjs');
 const { readRepo, sha, url, finding, output, routine } = require('./test-helpers.cjs');
 
 // The verdict when Claude is the only reviewer, which reads as one AI review
@@ -142,24 +142,6 @@ test('the review decides whether a person must review, failing closed', () => {
     'success',
   );
   assert.deepEqual(claude('failure', '').reasons, ['No AI review completed.']);
-});
-
-test('globs match repository-relative paths', () => {
-  for (const [glob, yes, no] of [
-    [
-      '.github/workflows/**',
-      ['.github/workflows/ci.yml', '.github/workflows/a/b.yml'],
-      ['github/workflows/ci.yml', '.github/workflows'],
-    ],
-    ['**/migrations/**', ['migrations/1.sql', 'db/migrations/1.sql'], ['db/migrations_old/1.sql', 'db/migrations']],
-    ['**/CODEOWNERS', ['CODEOWNERS', '.github/CODEOWNERS'], ['CODEOWNERS.md', 'docs/NOT_CODEOWNERS']],
-    ['infra/*.tf', ['infra/main.tf'], ['infra/prod/main.tf', 'infra/main.tfvars']],
-    ['infra/**/prod/*.tf', ['infra/prod/a.tf', 'infra/aws/us/prod/a.tf'], ['infra/aws/prod/x/a.tf']],
-    ['a?c.(x)', ['abc.(x)'], ['ac.(x)', 'a/c.(x)', 'abc.x']],
-  ]) {
-    for (const file of yes) assert.ok(globRegExp(glob).test(file), `${glob} ${file}`);
-    for (const file of no) assert.ok(!globRegExp(glob).test(file), `${glob} ${file}`);
-  }
 });
 
 test("the suggested reviewer is the review's pick from the candidates, or the one with the most history", () => {

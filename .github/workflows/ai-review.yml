@@ -4,14 +4,13 @@
 # `ai-review/verdict` commit status on the reviewed head. Findings are ranked
 # P0-P3, as Codex review ranks them; a P0-P2 finding from any reviewer fails
 # it. It also reports `ai-review/human`, which waits for a person's approval
-# when a reviewer, a reserved path, the needs-human-review label, an override,
-# or a fork calls for one, and passes otherwise. A repository that requires it
-# can drop its required approvals. When it waits, the review asks one
-# collaborator by name: the first reviewer's pick among those with recent
-# history in the changed files. ai-review-human.yml re-sets it when reviews or
-# that label change. Reviewers that do not complete leave the verdict to those
-# that did; when none does, the verdict is an error and the head waits for a
-# person. A run that reviews nothing, because start skipped the head or
+# when a reviewer, the needs-human-review label, an override, or a fork calls
+# for one, and passes otherwise. A repository that requires it can drop its
+# required approvals. When it waits, the review asks one collaborator by name:
+# the first reviewer's pick among those with recent history in the changed
+# files. ai-review-human.yml re-sets it when reviews or that label change.
+# Reviewers that do not complete leave the verdict to those that did; when
+# none does, the verdict is an error and the head waits for a person. A run that reviews nothing, because start skipped the head or
 # failed, publishes no verdict.
 #
 # To add a provider, add a job like `claude` and `codex`, list it in
@@ -63,10 +62,6 @@ on:
     inputs:
       focus:
         description: Extra review focus bullets for the calling repository, appended to the policy's shared list.
-        type: string
-        default: ''
-      human_review_paths:
-        description: Newline-separated globs of paths whose changes always need a human review, whatever the reviewers decide.
         type: string
         default: ''
       # Dependabot's pull_request_target runs keep the requested write token.
@@ -401,7 +396,6 @@ jobs:
           step: publish
           reviews: ${{ toJSON(needs) }}
           review-outputs: ${{ runner.temp }}/ai-review-outputs
-          human-review-paths: ${{ inputs.human_review_paths }}
 
   override:
     if: >-

@@ -81,7 +81,6 @@ person's review. It waits for one when:
   others rely on, changes billing or pricing, does something its description
   does not explain, or could not be reviewed closely. No kind of file needs a
   person by itself; simple, low-risk changes pass whatever they touch.
-- The change touches a path the repository lists in `human_review_paths`.
 - Someone adds the `needs-human-review` label.
 - The verdict was overridden, or the PR comes from a fork.
 
@@ -94,10 +93,9 @@ and what the reviews could not check, such as behavior only running the code
 shows. When the reviews found nothing blocking, each read the whole change
 closely, and each that asked for a person gave its own reasons, the comment
 says the code needs no second review for bugs, and the marker that ends it
-records `cleared`. It never says so for a path in `human_review_paths`, or for
-a PR labeled `needs-human-review` when the review publishes. The
-`guided-review` skill reads the marker, the labels, and `ai-review/human`, so a
-label added later still counts. It walks the reviewer through those decisions,
+records `cleared`. It never says so for a PR labeled `needs-human-review` when
+the review publishes. The `guided-review` skill reads the marker, the labels,
+and `ai-review/human`, so a label added later still counts. It walks the reviewer through those decisions,
 runs `pr-review` only when the code is not cleared, and posts their answers,
 once they confirm, as their review of that commit.
 Requiring this status instead of an approval lets a PR merge on the AI review
@@ -287,15 +285,8 @@ jobs:
     with:
       focus: |
         - Accessibility regressions in rendered components
-      human_review_paths: |
-        **/migrations/**
-        infra/prod/**
       allowed_bots: dependabot[bot],renovate[bot]
 ```
-
-`human_review_paths` takes one glob per line, matched against paths from the
-repository root: `*` stays within a directory, `**/` spans any number of them,
-and lines starting with `#` are comments.
 
 ### Changing the review
 
