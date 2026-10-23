@@ -134,7 +134,11 @@ const livePull = (o, number) => ({
   user: { login: 'author' },
   requested_reviewers: o.requested,
   requested_teams: o.requestedTeams,
-  head: { sha: o.liveHead, repo: o.headRepo && { full_name: o.headRepo } },
+  head: {
+    sha: typeof o.liveHead === 'function' ? o.liveHead() : o.liveHead,
+    ref: 'feature',
+    repo: o.headRepo && { full_name: o.headRepo },
+  },
   base: { ref: o.liveBase },
 });
 

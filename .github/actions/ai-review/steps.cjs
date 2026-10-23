@@ -1,6 +1,6 @@
 'use strict';
 
-const { humanStatusContext, overriddenBy, runUrl, severities, clean } = require('./constants.cjs');
+const { overriddenBy, runUrl, severities, clean } = require('./constants.cjs');
 const { verdict } = require('./verdict.cjs');
 const { pathReasons } = require('./paths.cjs');
 const { decisionMarker, humanSection, storedDecision } = require('./decision.cjs');
@@ -10,7 +10,6 @@ const {
   summaryComment,
   verdictState,
   permissionOf,
-  canWrite,
   livePull,
   isFork,
   liveReasons,
@@ -18,6 +17,7 @@ const {
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
 const { reviewersOf, parsed, completed, cap, severityOf } = require('./reviews.cjs');
+const { start } = require('./start.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
 // the same head. Without one, it still publishes, so a reopen finds a verdict.
@@ -34,41 +34,6 @@ async function headReviewedElsewhere(github, context) {
 // code and overwrite the summary comment with a stale result.
 async function isLiveHead(github, context) {
   return (await livePull(github, context)).head.sha === context.payload.pull_request.head.sha;
-}
-
-// Marks the live head as under review, so the gate is pending rather than
-// absent and an override cannot pass it before the verdict lands.
-async function start({ github, context, core }) {
-  const sha = context.payload.pull_request.head.sha;
-  const skip = (reason) => {
-    core.notice(`Skipping the review of ${sha.slice(0, 7)}: ${reason}`);
-    core.setOutput('review', 'false');
-  };
-  const pull = await livePull(github, context);
-  if (pull.head.sha !== sha) return skip('it is no longer the PR head.');
-  // A retarget keeps the head, so it shares the head's run group, and runs can
-  // enter a group out of order. Compare the branch, which merges do not move.
-  if (pull.base.ref !== context.payload.pull_request.base.ref)
-    return skip('the PR has been retargeted since this event.');
-  // The payload's draft flag can be stale: a push followed at once by
-  // ready_for_review delivers a synchronize payload that still says draft.
-  if (pull.draft) return skip('the PR is a draft.');
-  // Reopening must not start a second review of a head already reviewed or
-  // under review; a head pushed while the PR was closed has no verdict yet. A
-  // re-run replays the reopen and finds its own first attempt's verdict.
-  if (context.payload.action === 'reopened' && context.runAttempt === 1) {
-    const state = await verdictState(github, context, sha);
-    if (state !== 'none') return skip(`it already has a ${state} verdict.`);
-  }
-  // The action refuses users without write access (bots go through its
-  // allowed_bots), which would replace this SHA's verdict with an error, for
-  // example when a triage user reopens the PR.
-  if (!context.actor.endsWith('[bot]') && !(await canWrite(github, context, context.actor))) {
-    return skip(`${context.actor} lacks write access.`);
-  }
-  await setStatus(github, context, sha, 'pending', 'The AI review is running.');
-  await setStatus(github, context, sha, 'pending', 'Waiting for the AI review.', humanStatusContext);
-  core.setOutput('review', 'true');
 }
 
 // One summary comment per PR, edited in place, for the live head only: the

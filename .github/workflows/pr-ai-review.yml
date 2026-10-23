@@ -14,6 +14,7 @@ jobs:
   ai-review:
     uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
     permissions:
+      actions: write
       contents: read
       pull-requests: write
       statuses: write

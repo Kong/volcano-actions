@@ -15,6 +15,7 @@ jobs:
     if: github.event.changes.base || github.event.label.name == 'ai-review-override'
     uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
     permissions:
+      actions: write
       contents: read
       pull-requests: write
       statuses: write

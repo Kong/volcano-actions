@@ -13,7 +13,9 @@ write or admin access, including the PR author, can accept one head with the
 `ai-review-override` label. This includes fork PRs, which the AI review does
 not run on. The label is removed after processing. Each new commit needs its
 own override. Volcano repositories call it instead of keeping their own copy,
-so a fix lands once.
+so a fix lands once. When a push replaces the head under review, the run
+reviewing the new head cancels the older head's review, whose verdict nobody
+would read.
 
 ### Reviewers
 
@@ -149,6 +151,7 @@ To add it to a repository:
      ai-review:
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
        permissions:
+         actions: write
          contents: read
          pull-requests: write
          statuses: write
@@ -174,6 +177,7 @@ To add it to a repository:
        if: github.event.changes.base || github.event.label.name == 'ai-review-override'
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
        permissions:
+         actions: write
          contents: read
          pull-requests: write
          statuses: write
@@ -187,10 +191,11 @@ To add it to a repository:
    runs, with every job skipped, would hide the review. Keep the two
    workflows' names and job IDs distinct.
 
-   Grant every permission shown; a called workflow cannot raise them. Do not
-   add `concurrency`: the called workflow sets its own group, and a matching
-   caller group deadlocks it. Both workflows share that group, so a retarget
-   still cancels a review of the old base.
+   Grant every permission shown; a called workflow cannot raise them.
+   `actions: write` lets the review cancel its runs for heads the PR has
+   moved past. Do not add `concurrency`: the called workflow sets its own
+   group, and a matching caller group deadlocks it. Both workflows share that
+   group, so a retarget still cancels a review of the old base.
 
    For `ai-review/human` to follow reviews and the `needs-human-review`
    label, add `.github/workflows/ai-review-approvals.yml`:
