@@ -111,6 +111,12 @@ function byLines(groups, group) {
   return best?.other;
 }
 
+// Whether a finding's title adds nothing to one already shown: the same words,
+// or nearly the same title in the same file. Nearly the same title in another
+// file may name another problem, so a merge across files keeps both titles.
+const saysAlready = (shown, f) =>
+  normalized(shown.title) === normalized(f.title) || (shown.path === f.path && similarTitles(shown.title, f.title));
+
 // A problem as the summary shows it: its most severe finding's level and title,
 // the other reviewers' titles that say something else, so a wrong merge hides
 // nothing, and every location. It is deferred when each of its P0-P2 findings
@@ -118,13 +124,13 @@ function byLines(groups, group) {
 // names each finding in it by title and line, which tells apart any two
 // problems, so a person's decision on one never stands for another.
 function shown(group) {
-  const titles = [group[0].title];
-  for (const { title } of group.slice(1)) if (!titles.some((t) => similarTitles(t, title))) titles.push(title);
+  const titled = [group[0]];
+  for (const f of group.slice(1)) if (!titled.some((t) => saysAlready(t, f))) titled.push(f);
   const blocking = group.filter((m) => failing.has(m.severity));
   return {
     severity: group[0].severity,
-    title: titles[0],
-    also: titles.slice(1),
+    title: group[0].title,
+    also: titled.slice(1).map((f) => f.title),
     at: locations(group),
     deferred: blocking.length > 0 && blocking.every((m) => m.severity === 'p2' && m.deferred === true),
     key: group

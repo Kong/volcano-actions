@@ -81,7 +81,8 @@ test('nearly the same title is one problem in any file', () => {
     ],
   );
   assert.deepEqual(listed(v), [
-    '- `internal/handlers/exports.go:104`, `internal/jobs/export.go:300` Exports are checked against the monthly quota but never counted',
+    // Across files, both titles stay, so a wrong merge hides nothing.
+    '- `internal/handlers/exports.go:104`, `internal/jobs/export.go:300` Exports are checked against the monthly quota but never counted (also reported as: Exports never consume the monthly quota)',
     '- `docs/a.md` Typo',
   ]);
   // A whole-file finding matches by title alone, and keeps its path.
@@ -90,6 +91,15 @@ test('nearly the same title is one problem in any file', () => {
     [at('docs/a.md', 7, 'p3', 'typo in the  Setup guide')],
   );
   assert.deepEqual(listed(file), ['- `docs/a.md:7` Typo in the setup guide.']);
+  // Similar titles in two files may be two problems: the count merges them,
+  // and the summary names both.
+  const twoFiles = both(
+    [at('internal/upload.go', 40, 'p2', 'Missing error handling in the upload handler')],
+    [at('internal/export.go', 80, 'p2', 'Missing error handling in the export handler')],
+  );
+  assert.deepEqual(listed(twoFiles), [
+    '- `internal/upload.go:40`, `internal/export.go:80` Missing error handling in the upload handler (also reported as: Missing error handling in the export handler)',
+  ]);
 });
 
 test('different problems stay apart', () => {
