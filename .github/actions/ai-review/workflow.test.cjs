@@ -123,7 +123,6 @@ test('the review workflow interpolates no untrusted event text', () => {
   // Inputs come from the caller's base-branch stub.
   assert.doesNotMatch(workflow, /github\.event\.(pull_request\.(title|body)|comment|review|head_commit)/u);
   assert.match(jobs.override, new RegExp(`github\\.event\\.label\\.name == '${overrideLabel}'`, 'u'));
-  assert.match(jobs.verdict, /\n {10}human-review-paths: \$\{\{ inputs\.human_review_paths \}\}\n/u);
 });
 
 test('the reusable workflows and composite action pin every action to a full commit SHA', () => {

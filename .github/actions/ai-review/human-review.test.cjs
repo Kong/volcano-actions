@@ -3,18 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { humanStatusContext, humanLabel, publish } = require('./ai-review.cjs');
-const {
-  sha,
-  finding,
-  output,
-  routine,
-  review,
-  claudeReviews,
-  clearAfter,
-  client,
-  context,
-  core,
-} = require('./test-helpers.cjs');
+const { sha, finding, output, routine, review, claudeReviews, client, context, core } = require('./test-helpers.cjs');
 
 // Publishes a clean review with this human decision.
 async function publishHuman(t, human, options = {}) {
@@ -43,61 +32,6 @@ test('publish passes the human status only when nothing calls for a person', asy
   const long = await publishHuman(t, { needed: true, reasons: ['x'.repeat(300)] });
   assert.equal(long.human[0][2].length, 140);
   assert.ok(long.human[0][2].endsWith('…'));
-});
-
-test('CI and reviewer instruction files need no person by themselves', async (t) => {
-  // No kind of file needs a person by itself; reviewers judge CI and reviewer
-  // instructions like any other change, and nothing lists the files.
-  const ci = await publishHuman(t, routine, {
-    files: [{ filename: '.github/workflows/ci.yml' }, { filename: 'api/AGENTS.md' }, { filename: 'CODEOWNERS' }],
-    failFiles: true,
-  });
-  assert.deepEqual(ci.human, [[sha, 'success', 'No human review needed.']]);
-});
-
-test("a repository's reserved paths need a person", async (t) => {
-  clearAfter(t, 'HUMAN_REVIEW_PATHS');
-  // A repository's own paths decide without the reviewers, at a file's old or
-  // new path.
-  process.env.HUMAN_REVIEW_PATHS = '# Schema changes\n  **/migrations/**  \n\ninfra/*.tf\n';
-  const moved = await publishHuman(t, routine, {
-    files: [{ filename: 'db/old/1.sql', previous_filename: 'db/migrations/1.sql' }],
-  });
-  assert.deepEqual(moved.human, [
-    [
-      sha,
-      'pending',
-      'Needs human review: Changes a path this repository reserves for human review: db/migrations/1.sql.',
-    ],
-  ]);
-  const many = await publishHuman(t, routine, {
-    files: [{ filename: 'infra/a.tf' }, { filename: 'main.go' }, { filename: 'infra/b.tf' }],
-  });
-  assert.deepEqual(many.human, [
-    [
-      sha,
-      'pending',
-      'Needs human review: Changes a path this repository reserves for human review: infra/a.tf (+1 more).',
-    ],
-  ]);
-  const elsewhere = await publishHuman(t, routine, {
-    files: [{ filename: '.github/workflows/ci.yml' }, { filename: 'infra/prod/main.tf' }],
-  });
-  assert.deepEqual(elsewhere.human, [[sha, 'success', 'No human review needed.']]);
-  const capped = await publishHuman(t, routine, {
-    files: Array.from({ length: 3000 }, (_, i) => ({ filename: `src/${i}.go` })),
-  });
-  assert.deepEqual(capped.human, [
-    [sha, 'pending', 'Needs human review: Changes more files than GitHub lists, so not every path could be checked.'],
-  ]);
-  const unlisted = await publishHuman(t, routine, { failFiles: true });
-  assert.deepEqual(unlisted.human, [
-    [
-      sha,
-      'pending',
-      'Needs human review: Could not list the changed files to check them for paths that need a human review.',
-    ],
-  ]);
 });
 
 test('publish records an incomplete review as needing a person', async (t) => {
@@ -188,10 +122,9 @@ test('a person is asked to decide the reasons, not to review the code again', as
 });
 
 test('nothing says the code is done when the review cannot vouch for it', async (t) => {
-  clearAfter(t, 'HUMAN_REVIEW_PATHS');
   // Nothing says the code is done when findings block, when the review could
   // not read it closely or did not say, when it gave no reason of its own, or
-  // when the path is reserved for a person.
+  // when the PR is labeled for a person.
   for (const [why, args] of [
     ['blocking finding', { findings: [finding('p1')] }],
     ['not read closely', { closely: false }],
@@ -206,8 +139,4 @@ test('nothing says the code is done when the review cannot vouch for it', async 
     assert.doesNotMatch(body, /no second review/u, why);
     assert.equal(marked(body), false, why);
   }
-  process.env.HUMAN_REVIEW_PATHS = '**/migrations/**';
-  const reserved = await publishQuestion(t, { options: { files: [{ filename: 'db/migrations/1.sql' }] } });
-  assert.match(reserved, /- Changes a path this repository reserves for human review: db\/migrations\/1\.sql\.\n/u);
-  assert.doesNotMatch(reserved, /no second review/u);
 });

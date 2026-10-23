@@ -242,12 +242,7 @@ test('one verdict job publishes every reviewer once any of them finishes', () =>
   }
   const timeout = (text) => Number(text.match(/\n {4,8}timeout-minutes: (\d+)\n/u)[1]);
   assert.ok(timeout(download) < timeout(job));
-  for (const line of [
-    'step: publish',
-    'reviews: ${{ toJSON(needs) }}',
-    `review-outputs: ${outputs}`,
-    'human-review-paths: ${{ inputs.human_review_paths }}',
-  ]) {
+  for (const line of ['step: publish', 'reviews: ${{ toJSON(needs) }}', `review-outputs: ${outputs}`]) {
     assert.ok(job.includes(`\n          ${line}\n`), line);
   }
 });

@@ -4,7 +4,6 @@
 // so a PR cannot change how its review is judged. See action.yml.
 const { statusContext, humanStatusContext, overrideLabel, humanLabel, marker, severities } = require('./constants.cjs');
 const { verdict } = require('./verdict.cjs');
-const { globRegExp } = require('./paths.cjs');
 const { start, publish, override, gate } = require('./steps.cjs');
 const { prepare } = require('./prepare.cjs');
 
@@ -16,7 +15,6 @@ module.exports = {
   marker,
   severities,
   verdict,
-  globRegExp,
   prepare,
   start,
   publish,

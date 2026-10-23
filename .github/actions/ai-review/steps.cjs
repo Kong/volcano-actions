@@ -2,7 +2,6 @@
 
 const { humanStatusContext, overriddenBy, runUrl, severities, clean } = require('./constants.cjs');
 const { verdict } = require('./verdict.cjs');
-const { pathReasons } = require('./paths.cjs');
 const { decisionMarker, humanSection, storedDecision } = require('./decision.cjs');
 const {
   setStatus,
@@ -199,8 +198,7 @@ async function publish({ github, context, core }) {
   reportIncomplete(core, pr.head.sha, result);
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
-  const paths = await pathReasons(github, context, pr.number);
-  const decision = { reasons: [...result.reasons, ...paths], reviewer: result.reviewer };
+  const decision = { reasons: result.reasons, reviewer: result.reviewer };
   let live = null;
   try {
     live = await liveReasons(github, context, pull, pr.head.sha);
@@ -209,9 +207,9 @@ async function publish({ github, context, core }) {
   } catch (error) {
     core.setFailed(`The verdict is published, but the human review status failed: ${error.message}`);
   }
-  // A reserved path or the needs-human-review label asks a person whatever
-  // the reviews decide, so neither is theirs to clear; unread labels fail closed.
-  decision.cleared = Boolean(result.cleared) && paths.length === 0 && live?.length === 0;
+  // The needs-human-review label asks a person whatever the reviews decide,
+  // so it is not theirs to clear; unread labels fail closed.
+  decision.cleared = Boolean(result.cleared) && live?.length === 0;
   await publishSummary({ github, context, core }, result, decision);
   await postFindings({ github, context, core }, reviewers);
 }
