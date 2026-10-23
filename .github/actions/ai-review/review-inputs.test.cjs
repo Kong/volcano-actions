@@ -50,7 +50,37 @@ test('a reviewer runs in the base and reads the head without its instruction fil
     assert.match(input('pr.diff'), new RegExp(text, 'u'));
   assert.match(input('commits.txt'), /feat: change under review/u);
   assert.ok(input('description.md').length > 0);
-  assert.deepEqual(JSON.parse(input('review-comments.jsonl')), { path: 'main.go', line: 1 });
+});
+
+test("the review comments are the author's, the review's own, and insiders', across pages", (t) => {
+  const { input } = prepare(t, {
+    base: { 'main.go': 'package main\n' },
+    head: { 'main.go': 'package main\n\n// changed\n' },
+  });
+  const comments = input('review-comments.jsonl')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    comments.map((c) => [c.id, c.author]),
+    [
+      [1, 'alice'],
+      [2, 'github-actions[bot]'],
+      [3, 'bob'],
+      [6, 'carol'],
+    ],
+  );
+  assert.deepEqual(Object.keys(comments[0]), [
+    'id',
+    'in_reply_to_id',
+    'path',
+    'line',
+    'original_line',
+    'author',
+    'created_at',
+    'updated_at',
+    'body',
+  ]);
 });
 
 // A base link such as .claude/skills -> ../.agents/skills resolves within the

@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { candidates } = require('./candidates.cjs');
+const { conversation } = require('./conversation.cjs');
 
 // The review policy every reviewer gets, with this PR's values filled in. The
 // caller's focus bullets extend the shared list, and the line drops out when
@@ -12,6 +13,7 @@ function policy(context, inputs, focus = '') {
   const values = {
     repo: `${context.repo.owner}/${context.repo.repo}`,
     number: String(pr.number),
+    author: pr.user.login,
     base: pr.base.sha,
     head: pr.head.sha,
     inputs,
@@ -42,13 +44,14 @@ function schemas() {
   return { schema: JSON.stringify(schema), withoutMaxLength: JSON.stringify(withoutMaxLength(schema)) };
 }
 
-// Adds reviewers.jsonl to the inputs prepare.sh wrote and sets what a reviewer
-// job reads. setOutput writes each value under a random delimiter, so a
+// Adds reviewers.jsonl, comments.jsonl, and previous-verdict.md to the inputs
+// prepare.sh wrote and sets what a reviewer job reads. setOutput writes each value under a random delimiter, so a
 // multi-line one cannot end its output early.
 async function prepare({ github, context, core }) {
   // action.yml gives prepare.sh and this step the same directory.
   const dir = process.env.INPUTS;
   const logins = await candidates({ github, context, core }, dir);
+  await conversation({ github, context }, dir);
   const { schema, withoutMaxLength: bare } = schemas();
   core.setOutput('inputs', dir);
   core.setOutput('candidates', JSON.stringify(logins));

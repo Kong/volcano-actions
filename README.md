@@ -8,12 +8,15 @@ Shared GitHub Actions and reusable workflows for Volcano repositories. The
 
 `.github/workflows/ai-review.yml` reviews each push to a same-repository pull
 request with several AI reviewers and reports one `ai-review/verdict` commit
-status on the reviewed head. P0-P2 findings fail it; a human collaborator with
-write or admin access, including the PR author, can accept one head with the
+status on the reviewed head. P0-P2 findings fail it, except a P2 the author
+deferred, which goes to a person. A human collaborator with write or admin
+access, including the PR author, can accept one head with the
 `ai-review-override` label. This includes fork PRs, which the AI review does
 not run on. The label is removed after processing. Each new commit needs its
 own override. Volcano repositories call it instead of keeping their own copy,
-so a fix lands once.
+so a fix lands once. When a push replaces the head under review, the run
+reviewing the new head cancels the older head's review, whose verdict nobody
+would read.
 
 ### Reviewers
 
@@ -23,8 +26,9 @@ head from the same inputs, under one policy and output schema that ship with
 the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 
 - The action's `prepare` step builds the inputs in a checkout of the base
-  branch: the diff, commit messages, description, and inline comments; a
-  checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
+  branch: the diff, commit messages, and description; the comments the
+  author and the repository's collaborators left on the PR and on its lines,
+  with the review's own inline findings; the previous verdict; a checkout of the head without its `AGENTS.md`, `CLAUDE.md`, `.claude/`, and
   `.mcp.json` files; the base's instruction files that govern the changed
   paths; and the reviewer candidates. Its outputs give the reviewer the policy,
   with the caller's `focus` applied, and the schema, along with a copy without
@@ -38,12 +42,22 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 One verdict combines every reviewer, and the summary comment reads as a
 single review that names no reviewer or provider, however many ran:
 
-- A P0-P2 finding from any reviewer fails it. Any reviewer can ask for a
-  person.
-- The comment lists every reviewer's findings once, by title. Each finding on
-  a line also gets an inline comment that explains why it matters, with a
-  footer naming the model that found it, so two models reporting the same
+- A P0-P2 finding from any reviewer fails it, unless it is a P2 the author
+  deferred (see below). Any reviewer can ask for a person.
+- The comment lists and counts each problem once, by title. Findings from
+  different reviewers with nearly the same title, or else within 20 lines of
+  each other in one file, are one problem, shown at the most severe level any
+  reviewer gave it, with every location and the other reviewers' titles. One
+  reviewer's findings stay as it wrote them. Each finding on a line, except a
+  deferred P2, also gets an inline comment that explains why it matters, with
+  a footer naming the model that found it, so two models reporting the same
   problem leave two comments.
+- Each round sees how people answered the last one. A P2 finding the PR
+  author defers to named follow-up work, or declines with a concrete reason,
+  in the description or a comment, is listed for a person to decide instead
+  of failing the verdict again, unless the code has since made it worse. P0
+  and P1 findings still fail. Such a verdict passes only once the summary
+  comment records the deferral, which the human review reads back.
 - When a provider has an outage or its review otherwise does not complete, the
   other reviewers' verdict stands, and the run log warns which one is missing.
   When none completes, the verdict is an error and the head waits for a
@@ -81,21 +95,27 @@ person's review. It waits for one when:
   others rely on, changes billing or pricing, does something its description
   does not explain, or could not be reviewed closely. No kind of file needs a
   person by itself; simple, low-risk changes pass whatever they touch.
+- The author deferred a P2 finding.
 - The change touches a path the repository lists in `human_review_paths`.
 - Someone adds the `needs-human-review` label.
 - The verdict was overridden, or the PR comes from a fork.
 
 It passes when none applies, or once a collaborator with write access other
 than the author approves. Like the repositories' required approvals today, an
-approval carries across later pushes. Changes requested by a collaborator
-with write access hold it until they approve or their review is dismissed.
+approval carries across later pushes, except past a P2 the author deferred:
+then only an approval of that commit given after GitHub recorded the summary
+that reported the deferral counts. A re-run of the commit keeps that time
+unless it defers a problem the last review did not, naming each finding in it
+by title and line. Changes requested by a collaborator with write access hold
+it until they approve or their review is dismissed.
 The summary comment lists each reason as a question for the person to decide,
 and what the reviews could not check, such as behavior only running the code
 shows. When the reviews found nothing blocking, each read the whole change
 closely, and each that asked for a person gave its own reasons, the comment
 says the code needs no second review for bugs, and the marker that ends it
-records `cleared`. It never says so for a path in `human_review_paths`, or for
-a PR labeled `needs-human-review` when the review publishes. The
+records `cleared`. It never says so for a deferred finding, a path in
+`human_review_paths`, or a PR labeled `needs-human-review` when the review
+publishes. The
 `guided-review` skill reads the marker, the labels, and `ai-review/human`, so a
 label added later still counts. It walks the reviewer through those decisions,
 runs `pr-review` only when the code is not cleared, and posts their answers,
@@ -114,7 +134,8 @@ publishes no verdict, so the head waits for a re-run.
 When it waits, the review requests one collaborator by name: the first
 reviewer's pick among the people with write access and recent commits to the
 changed files, falling back to whoever has the most, unless someone was
-already requested by name or has reviewed. A team request, such as from
+already requested by name or has reviewed. When an approval no longer counts
+because of a deferral, it asks that approver again instead. A team request, such as from
 CODEOWNERS, does not count, so a repository that opts in can drop a catch-all
 CODEOWNERS line.
 
@@ -149,6 +170,7 @@ To add it to a repository:
      ai-review:
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
        permissions:
+         actions: write
          contents: read
          pull-requests: write
          statuses: write
@@ -174,6 +196,7 @@ To add it to a repository:
        if: github.event.changes.base || github.event.label.name == 'ai-review-override'
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
        permissions:
+         actions: write
          contents: read
          pull-requests: write
          statuses: write
@@ -187,10 +210,11 @@ To add it to a repository:
    runs, with every job skipped, would hide the review. Keep the two
    workflows' names and job IDs distinct.
 
-   Grant every permission shown; a called workflow cannot raise them. Do not
-   add `concurrency`: the called workflow sets its own group, and a matching
-   caller group deadlocks it. Both workflows share that group, so a retarget
-   still cancels a review of the old base.
+   Grant every permission shown; a called workflow cannot raise them.
+   `actions: write` lets the review cancel its runs for heads the PR has
+   moved past. Do not add `concurrency`: the called workflow sets its own
+   group, and a matching caller group deadlocks it. Both workflows share that
+   group, so a retarget still cancels a review of the old base.
 
    For `ai-review/human` to follow reviews and the `needs-human-review`
    label, add `.github/workflows/ai-review-approvals.yml`:

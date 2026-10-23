@@ -121,8 +121,11 @@ const recorder =
 
 const issuesApi = (record) => ({
   listComments: () => {},
-  createComment: record('createComment'),
-  updateComment: record('updateComment'),
+  // GitHub answers a comment write with the comment, dated to the second.
+  createComment: record('createComment', () => ({ data: { id: 2, updated_at: '2026-10-23T12:00:05Z' } })),
+  updateComment: record('updateComment', (args) => ({
+    data: { id: args.comment_id, updated_at: '2026-10-23T12:00:05Z' },
+  })),
   removeLabel: record('removeLabel'),
 });
 
@@ -134,7 +137,11 @@ const livePull = (o, number) => ({
   user: { login: 'author' },
   requested_reviewers: o.requested,
   requested_teams: o.requestedTeams,
-  head: { sha: o.liveHead, repo: o.headRepo && { full_name: o.headRepo } },
+  head: {
+    sha: typeof o.liveHead === 'function' ? o.liveHead() : o.liveHead,
+    ref: 'feature',
+    repo: o.headRepo && { full_name: o.headRepo },
+  },
   base: { ref: o.liveBase },
 });
 

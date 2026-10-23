@@ -26,13 +26,16 @@ test('three reviews read as one AI review, shaped as one would', () => {
   const v = three([
     { findings: [finding('p3')] },
     { summary: 'Caches lookups.' },
-    { summary: 'Adds a lookup cache.', findings: [finding('pre_existing', { path: 'docs/a.md', line: 0 })] },
+    {
+      summary: 'Adds a lookup cache.',
+      findings: [finding('pre_existing', { path: 'docs/a.md', line: 0, title: 'Stale setup guide' })],
+    },
   ]);
   assert.equal(v.state, 'success');
   assert.equal(v.description, 'No P0-P2 findings (1 P3, 1 pre-existing).');
   assert.ok(
     v.body.startsWith(
-      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. [Run log](${url})\n\nAdds a cache.\n\n**⚪ P3**\n- \`internal/a.go:12\` Nil map write\n\n**🟣 Pre-existing**\n- \`docs/a.md\` Nil map write\n`,
+      `${marker}\n### AI review: no P0-P2 findings\n\nReviewed abcdef1. [Run log](${url})\n\nAdds a cache.\n\n**⚪ P3**\n- \`internal/a.go:12\` Nil map write\n\n**🟣 Pre-existing**\n- \`docs/a.md\` Stale setup guide\n`,
     ),
   );
   assert.ok(v.body.endsWith(`\n\n${ran}`));
@@ -40,7 +43,7 @@ test('three reviews read as one AI review, shaped as one would', () => {
   assert.equal(v.by, 'Claude, Codex, and Gemini');
 });
 
-test('a P0-P2 finding from any review fails the verdict, and every distinct finding counts', () => {
+test('a P0-P2 finding from any review fails the verdict, and every distinct problem counts', () => {
   for (const at of [0, 1, 2]) {
     const results = [{}, {}, {}];
     results[at] = { findings: [finding('p2'), finding('p3')] };
@@ -51,11 +54,15 @@ test('a P0-P2 finding from any review fails the verdict, and every distinct find
   }
   const all = three([
     { findings: [finding('p0')] },
-    { findings: [finding('p1')] },
-    { findings: [finding('p1'), finding('p1', { line: 30 })] },
+    { findings: [finding('p1'), finding('p1', { line: 60, title: 'Unchecked error' })] },
+    { findings: [finding('p1', { line: 14 }), finding('p2', { path: 'internal/b.go', title: 'Racy cache' })] },
   ]);
   assert.equal(all.description, '3 P0-P2 finding(s). See the AI review comment.');
-  assert.equal(all.body.match(/\n- `internal\/a\.go:\d+` Nil map write/gu).length, 3);
+  assert.deepEqual(all.body.match(/\n- `.*/gu), [
+    '\n- `internal/a.go:12,14` Nil map write',
+    '\n- `internal/a.go:60` Unchecked error',
+    '\n- `internal/b.go:12` Racy cache',
+  ]);
 });
 
 test('any review can ask for a person, and reasons and gaps combine without repeats', () => {

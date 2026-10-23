@@ -25,7 +25,7 @@ async function standing(github, context, pull) {
   const blockers = [];
   for (const [login, r] of latest) {
     if (r.state === 'DISMISSED' || !(await canWrite(github, context, login))) continue;
-    if (r.state === 'APPROVED') approvers.push({ login, commit: r.commit_id });
+    if (r.state === 'APPROVED') approvers.push({ login, commit: r.commit_id, at: r.submitted_at });
     else blockers.push(login);
   }
   const reviewed = reviews.some((r) => isOtherUser(r, pull));
@@ -58,23 +58,32 @@ function humanState({ approvers, blockers }, reasons) {
 }
 
 // An approval carries across pushes, as it does under the repositories'
-// required approvals today, none of which dismiss stale reviews.
-async function setHumanStatus(github, context, pull, sha, reasons) {
+// required approvals today, none of which dismiss stale reviews. With `since`,
+// as for a finding the author deferred, only an approval of this commit given
+// after then counts: an earlier one predates the decision it would stand for.
+// Those approvers are `stale`, to be asked again.
+async function setHumanStatus(github, context, pull, sha, reasons, since = null) {
   const reviews = await standing(github, context, pull);
-  const [state, description] = humanState(reviews, reasons);
+  const after = (a) => a.commit === sha && Date.parse(a.at) > Date.parse(since);
+  const counted = since ? { ...reviews, approvers: reviews.approvers.filter((a) => after(a)) } : reviews;
+  const stale = reviews.approvers.filter((a) => !counted.approvers.includes(a)).map((a) => a.login);
+  const [state, description] = humanState(counted, reasons);
   await setStatus(github, context, sha, state, fit(description), humanStatusContext);
   await settleIncompleteReview(github, context, sha, reviews.approvers);
-  return { waiting: state === 'pending' && reviews.blockers.length === 0 && !reviews.reviewed };
+  const open = state === 'pending' && reviews.blockers.length === 0;
+  return { waiting: open && (!reviews.reviewed || stale.length > 0), stale };
 }
 
-// Asks the suggested reviewer when the live head waits on its first human
-// review and nobody has been asked by name yet; a team request, such as one
-// from CODEOWNERS, does not count. Requesting a reviewer is a courtesy, so a
-// failure only warns.
-async function requestReviewer(github, context, core, pull, sha, { waiting }, reviewer) {
+// Asks for a review when the live head waits on a person and nobody has been
+// asked by name yet; a team request, such as one from CODEOWNERS, does not
+// count. It asks the approvers whose approval no longer counts, or else, before
+// the first human review, the suggested reviewer. Requesting a reviewer is a
+// courtesy, so a failure only warns.
+async function requestReviewer(github, context, core, pull, sha, { waiting, stale = [] }, reviewer) {
+  const asked = stale.length > 0 ? stale : [reviewer?.login].filter(Boolean);
   if (
     !waiting ||
-    !reviewer ||
+    asked.length === 0 ||
     pull.state !== 'open' ||
     pull.draft ||
     pull.head.sha !== sha ||
@@ -85,10 +94,10 @@ async function requestReviewer(github, context, core, pull, sha, { waiting }, re
     await github.rest.pulls.requestReviewers({
       ...context.repo,
       pull_number: pull.number,
-      reviewers: [reviewer.login],
+      reviewers: asked,
     });
   } catch (error) {
-    core.warning(`Could not request a review from ${reviewer.login}: ${error.message}`);
+    core.warning(`Could not request a review from ${asked.join(', ')}: ${error.message}`);
   }
 }
 

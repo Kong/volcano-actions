@@ -72,13 +72,48 @@ const lstatIn = (dir) => (file) => {
 };
 const readIn = (dir) => (file) => (lstatIn(dir)(file) ? fs.readFileSync(path.join(dir, file), 'utf8') : null);
 
+const comment = (id, login, type, association) => ({
+  id,
+  in_reply_to_id: null,
+  path: 'main.go',
+  line: 1,
+  original_line: 1,
+  user: { login, type },
+  author_association: association,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  body: `by ${login}`,
+});
+// Two pages of review comments by the author, the review's own findings, a
+// member, a stranger, another bot, and a collaborator.
+const reviewComments = [
+  [
+    comment(1, 'alice', 'User', 'CONTRIBUTOR'),
+    comment(2, 'github-actions[bot]', 'Bot', 'NONE'),
+    comment(3, 'bob', 'User', 'MEMBER'),
+    comment(4, 'eve', 'User', 'NONE'),
+    comment(5, 'copilot', 'Bot', 'MEMBER'),
+  ],
+  [comment(6, 'carol', 'User', 'COLLABORATOR')],
+];
+
 // Runs prepare.sh against a real repository whose head edits, adds, and
 // deletes instruction files.
 function prepare(t, { base, head }) {
   const dir = tempDir(t, 'ai-review-');
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\necho \'{"path":"main.go","line":1}\'\n', { mode: 0o755 });
+  // The PR's review comments come back as GitHub returns them, a page per
+  // array; anything else as one object.
+  fs.writeFileSync(
+    path.join(bin, 'gh'),
+    `#!/bin/sh\ncase "$2" in\n  */comments) cat '${path.join(dir, 'review-comments.json')}' ;;\n  *) echo '{"path":"main.go","line":1}' ;;\nesac\n`,
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(dir, 'review-comments.json'),
+    reviewComments.map((page) => JSON.stringify(page)).join('\n'),
+  );
   const { repo, git, commit } = scratchRepo(dir);
   const baseSha = commit(base, 'base');
   const headSha = commit(head, 'feat: change under review');
@@ -95,6 +130,7 @@ function prepare(t, { base, head }) {
       INPUTS: inputs,
       REPO: 'Kong/volcano-hosting',
       PR_NUMBER: '7',
+      PR_AUTHOR: 'alice',
     },
   });
   const input = (file) => fs.readFileSync(path.join(inputs, file), 'utf8');

@@ -12,6 +12,7 @@ const {
   joinNames,
 } = require('./constants.cjs');
 const { cap, humanReasons, clearsCode, suggestedReviewer, severityOf, parsed, completed } = require('./reviews.cjs');
+const { problems } = require('./problems.cjs');
 
 const heading = 'AI review';
 const noneCompleted = 'No AI review completed.';
@@ -35,6 +36,7 @@ function shape(review) {
       path: cap(String(f.path), 300),
       line: f.line,
       title: cap(String(f.title), 200),
+      deferred: f.deferred === true,
     })),
     notChecked: (Array.isArray(review.not_checked) ? review.not_checked : [])
       .filter((n) => typeof n === 'string' && n.trim())
@@ -42,31 +44,19 @@ function shape(review) {
   };
 }
 
-const sameProblem = (f) =>
-  JSON.stringify([
-    f.severity,
-    f.path,
-    f.line,
-    f.title
-      .toLowerCase()
-      .replaceAll(/\s+/gu, ' ')
-      .replace(/[\s.!]+$/u, '')
-      .trim(),
-  ]);
+// A P2 the PR author deferred, which a person decides instead of the verdict.
+const deferrable = (f) => f.severity === 'p2' && f.deferred;
 
-// Several reviews as one: every finding without exact repeats, and every gap.
-// The summary is the first review's, or, when any review blocks, the first
-// blocking review's, so its risk call agrees with the heading.
+// Every review as one: each problem once, however many reviewers reported it
+// (see problems.cjs), and every gap. The summary is the first review's, or,
+// when any review blocks, the first blocking review's, so its risk call agrees
+// with the heading.
 function union(reviews) {
   const shaped = reviews.map((r) => shape(r));
-  const findings = new Map();
-  for (const f of shaped.flatMap((r) => r.findings)) {
-    if (!findings.has(sameProblem(f))) findings.set(sameProblem(f), f);
-  }
-  const blocks = shaped.find((r) => r.findings.some((f) => failing.has(f.severity)));
+  const blocks = shaped.find((r) => r.findings.some((f) => failing.has(f.severity) && !deferrable(f)));
   return {
     summary: (blocks ?? shaped[0]).summary,
-    findings: [...findings.values()],
+    findings: problems(shaped.map((r) => r.findings)),
     notChecked: shaped.flatMap((r) => r.notChecked),
   };
 }
@@ -90,37 +80,56 @@ function incompleteVerdict(short, url, candidates, missed) {
   };
 }
 
-const blockingIn = (findings) => findings.filter((f) => failing.has(f.severity));
+const blockingIn = (problems) => problems.filter((p) => failing.has(p.severity) && !p.deferred);
+const deferredIn = (problems) => problems.filter((p) => p.deferred);
+const deferredLabel = '⏸️ Deferred P2, for a person to decide';
 
-// The comment's findings, most severe first, and what the review could not
-// check, all from the one review it shows.
+function headline(problems, failed) {
+  if (failed) return `${blockingIn(problems).length} P0-P2 finding(s)`;
+  const deferred = deferredIn(problems).length;
+  return deferred > 0 ? `${deferred} deferred P2 finding(s)` : 'no P0-P2 findings';
+}
+
+// The comment's problems, most severe first, and what the reviews could not
+// check.
 function findingsBody({ shown, failed, notChecked, short, url, coverage }) {
-  const item = (f) => `- ${code(f.line > 0 ? `${f.path}:${f.line}` : f.path)} ${clean(f.title)}`;
+  const where = (p) => p.at.map(({ path, lines }) => code(lines.length > 0 ? `${path}:${lines.join(',')}` : path));
+  const also = (p) => (p.also.length > 0 ? ` (also reported as: ${p.also.map((t) => clean(t)).join('; ')})` : '');
+  const item = (p) => `- ${where(p).join(', ')} ${clean(p.title)}${also(p)}`;
   const body = [
     marker,
-    failed
-      ? `### ${heading}: ${blockingIn(shown.findings).length} P0-P2 finding(s)`
-      : `### ${heading}: no P0-P2 findings`,
+    `### ${heading}: ${headline(shown.findings, failed)}`,
     '',
     `Reviewed ${short}.${coverage && ` ${coverage}.`} [Run log](${url})`,
     '',
     clean(shown.summary),
   ];
-  for (const [level, label] of Object.entries(severities)) {
-    const at = shown.findings.filter((f) => f.severity === level);
-    if (at.length > 0) body.push('', `**${label}**`, ...at.map((f) => item(f)));
+  const sections = Object.entries(severities).flatMap(([level, label]) => [
+    [label, shown.findings.filter((p) => p.severity === level && !p.deferred)],
+    ...(level === 'p2' ? [[deferredLabel, deferredIn(shown.findings)]] : []),
+  ]);
+  for (const [label, at] of sections) {
+    if (at.length > 0) body.push('', `**${label}**`, ...at.map((p) => item(p)));
   }
   body.push('', readOnly, ...notChecked.map((n) => `- ${clean(n)}`));
   return body;
 }
 
-// Counts the findings the comment shows, so the status and comment agree.
-function describe(failed, findings, coverage) {
+// Counts the problems the comment shows, so the status and comment agree.
+function describe(failed, problems, coverage) {
   const also = coverage && `; ${coverage}`;
-  if (failed) return fit(`${blockingIn(findings).length} P0-P2 finding(s)${also}. See the ${heading} comment.`);
-  const count = (level) => findings.filter((f) => f.severity === level).length;
-  return fit(`No P0-P2 findings (${count('p3')} P3, ${count('pre_existing')} pre-existing${also}).`);
+  if (failed) return fit(`${headline(problems, failed)}${also}. See the ${heading} comment.`);
+  const count = (level) => problems.filter((p) => p.severity === level).length;
+  const deferred = deferredIn(problems).length;
+  const lead = deferred > 0 ? `${deferred} deferred P2 finding(s) for a person` : 'No P0-P2 findings';
+  return fit(`${lead} (${count('p3')} P3, ${count('pre_existing')} pre-existing${also}).`);
 }
+
+// A person decides whether deferred findings can wait.
+const deferralReasons = (problems) =>
+  deferredIn(problems).length > 0
+    ? ['Can the P2 finding(s) the author deferred or declined, listed in the summary, stand as the author answered?']
+    : [];
 
 // How many reviews did not complete, without naming them, so the PR shows when
 // a verdict rests on fewer reviews than the workflow runs.
@@ -141,16 +150,18 @@ function verdict(reviewers, sha, url, candidates = []) {
   const missed = entries.filter((entry) => !done.includes(entry)).map((entry) => entry.name);
   if (done.length === 0) return incompleteVerdict(short, url, candidates, missed);
   const reviews = done.map((entry) => entry.review);
-  const blocking = reviews.flatMap((r) => r.findings).filter((f) => failing.has(severityOf(f)));
+  const shown = union(reviews);
+  const blocking = blockingIn(shown.findings);
   const failed = blocking.length > 0;
-  const shown = reviews.length === 1 ? shape(reviews[0]) : union(reviews);
   const coverage = coverageOf(missed, entries.length);
   const body = findingsBody({ shown, failed, notChecked: list([shown.notChecked]), short, url, coverage });
   const decision = {
-    reasons: list(reviews.map((r) => humanReasons(r))),
+    reasons: [...deferralReasons(shown.findings), ...list(reviews.map((r) => humanReasons(r)))],
     reviewer: suggestedReviewer(reviews, candidates),
     by: joinNames(done.map((entry) => entry.name)),
     missed,
+    // A person decides each deferral, after it was made (see publish).
+    deferred: deferredIn(shown.findings).map((p) => p.key),
   };
   const description = describe(failed, shown.findings, coverage);
   if (failed) {
@@ -160,7 +171,9 @@ function verdict(reviewers, sha, url, candidates = []) {
     );
     return { state: 'failure', description, body: body.join('\n'), ...decision };
   }
-  return { state: 'success', description, body: body.join('\n'), ...decision, cleared: clearsCode(reviews, blocking) };
+  // Deferred findings are known problems, so the code is not cleared.
+  const cleared = clearsCode(reviews, blocking) && deferredIn(shown.findings).length === 0;
+  return { state: 'success', description, body: body.join('\n'), ...decision, cleared };
 }
 
 module.exports = { verdict };
