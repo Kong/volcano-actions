@@ -8,7 +8,7 @@
     "test": "node --test '.github/actions/ai-review/*.test.cjs'"
   },
   "devDependencies": {
-    "oxfmt": "0.73.0",
+    "oxfmt": "0.74.0",
     "oxlint": "1.88.0"
   }
 }
