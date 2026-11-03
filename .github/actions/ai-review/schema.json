@@ -6,7 +6,7 @@
     "summary": {
       "type": "string",
       "maxLength": 1500,
-      "description": "One or two sentences on what the change does and its overall risk."
+      "description": "One or two sentences on what the change does and its overall risk. For a security fix, what it changes, never the weakness it closes."
     },
     "findings": {
       "type": "array",
@@ -38,7 +38,7 @@
           "detail": {
             "type": "string",
             "maxLength": 1500,
-            "description": "Why it matters: what triggers the problem and its concrete result, and the fix when clear. A short Markdown paragraph with no headings."
+            "description": "Why it matters: what triggers the problem and its concrete result, and the fix when clear. For a security problem, the control the code needs, never how to exploit it. A short Markdown paragraph with no headings."
           },
           "deferred": {
             "type": "boolean",
