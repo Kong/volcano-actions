@@ -26,7 +26,10 @@ test('the policy has a security fix described by what it changes', () => {
 
 test('the schema asks for a security fix by what it changes', () => {
   const schema = JSON.parse(fs.readFileSync(path.join(__dirname, 'schema.json'), 'utf8'));
-  assert.match(schema.properties.summary.description, /For a security fix, what it changes, never the weakness it closes\./u);
+  assert.match(
+    schema.properties.summary.description,
+    /For a security fix, what it changes, never the weakness it closes\./u,
+  );
   assert.match(
     schema.properties.findings.items.properties.detail.description,
     /For a security problem, the control the code needs, never how to exploit it\./u,
@@ -56,7 +59,13 @@ test("an origin-check fix's review publishes what changed and nothing about a we
     ...c.named('createComment').map(({ body }) => body),
     ...c.named('createReviewComment').map(({ body }) => body),
   ];
-  assert.ok(posted.some((body) => body.includes('Compares the request origin host exactly')), 'the summary is posted');
-  assert.ok(posted.some((body) => body.includes('Name the allowed host in one constant')), 'the finding is posted');
+  assert.ok(
+    posted.some((body) => body.includes('Compares the request origin host exactly')),
+    'the summary is posted',
+  );
+  assert.ok(
+    posted.some((body) => body.includes('Name the allowed host in one constant')),
+    'the finding is posted',
+  );
   for (const body of posted) assert.doesNotMatch(body, weaknessWording);
 });
