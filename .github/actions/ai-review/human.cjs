@@ -29,7 +29,7 @@ async function standing(github, context, pull) {
     else blockers.push(login);
   }
   const reviewed = reviews.some((r) => isOtherUser(r, pull));
-  return { approvers, blockers, reviewed };
+  return { approvers, blockers, reviewed, reviews };
 }
 
 // When no AI review of a head completed, an approval of that exact commit
@@ -61,7 +61,9 @@ function humanState({ approvers, blockers }, reasons) {
 // required approvals today, none of which dismiss stale reviews. With `since`,
 // as for a finding the author deferred, only an approval of this commit given
 // after then counts: an earlier one predates the decision it would stand for.
-// Those approvers are `stale`, to be asked again.
+// Those approvers are `stale`, to be asked again. `clear` says nothing calls
+// for a person and nobody requested changes, which a self-approval needs (see
+// self-approval.cjs); `reviews` lists every review, to find the AI review's own.
 async function setHumanStatus(github, context, pull, sha, reasons, since = null) {
   const reviews = await standing(github, context, pull);
   const after = (a) => a.commit === sha && Date.parse(a.at) > Date.parse(since);
@@ -71,7 +73,8 @@ async function setHumanStatus(github, context, pull, sha, reasons, since = null)
   await setStatus(github, context, sha, state, fit(description), humanStatusContext);
   await settleIncompleteReview(github, context, sha, reviews.approvers);
   const open = state === 'pending' && reviews.blockers.length === 0;
-  return { waiting: open && (!reviews.reviewed || stale.length > 0), stale };
+  const clear = reasons.length === 0 && reviews.blockers.length === 0;
+  return { waiting: open && (!reviews.reviewed || stale.length > 0), stale, clear, reviews: reviews.reviews };
 }
 
 // Asks for a review when the live head waits on a person and nobody has been

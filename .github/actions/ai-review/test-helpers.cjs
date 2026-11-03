@@ -134,7 +134,7 @@ const livePull = (o, number) => ({
   draft: o.draft,
   state: o.state,
   labels: o.labels,
-  user: { login: 'author' },
+  user: { login: o.author ?? 'author' },
   requested_reviewers: o.requested,
   requested_teams: o.requestedTeams,
   head: {

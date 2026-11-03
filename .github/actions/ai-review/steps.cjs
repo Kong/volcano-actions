@@ -16,6 +16,7 @@ const {
   isLiveHead,
 } = require('./github.cjs');
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
+const { namedReviewer, syncSelfApproval } = require('./self-approval.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
 const { reviewersOf } = require('./reviews.cjs');
 const { postFindings } = require('./findings.cjs');
@@ -101,6 +102,7 @@ async function settleHuman({ github, context, core }, pull, decision, live) {
   try {
     const reasons = [...decision.reasons, ...live];
     const gate = await setHumanStatus(github, context, pull, sha, reasons, cutoff(decision));
+    await syncSelfApproval({ github, context, core }, pull, sha, gate);
     await requestReviewer(github, context, core, pull, sha, gate, decision.reviewer);
     return true;
   } catch (error) {
@@ -159,7 +161,7 @@ async function publish({ github, context, core }) {
   const paths = await pathReasons(github, context, pr.number);
   const decision = {
     reasons: [...result.reasons, ...paths],
-    reviewer: result.reviewer,
+    reviewer: namedReviewer(pr.user.login) ?? result.reviewer,
     deferred: result.deferred ?? [],
   };
   const live = await liveOrNull({ github, context, core }, pull);
@@ -213,6 +215,7 @@ async function override({ github, context, core }) {
     ...(await liveReasons(github, context, pull, pr.head.sha)),
   ];
   const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], cutoff(stored));
+  await syncSelfApproval({ github, context, core }, pull, pr.head.sha, gate);
   await setStatus(github, context, pr.head.sha, 'success', overriddenBy(sender.login));
   await removeOverrideLabel(github, context);
   await requestReviewer(github, context, core, pull, pr.head.sha, gate, stored?.reviewer);
@@ -247,6 +250,7 @@ async function gate({ github, context, core }) {
     }
     const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
     const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], cutoff(stored));
+    await syncSelfApproval({ github, context, core }, pull, pull.head.sha, status);
     await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
   }
 }

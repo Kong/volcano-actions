@@ -4,10 +4,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { candidates } = require('./candidates.cjs');
 const { conversation } = require('./conversation.cjs');
+const { selfApproverOf } = require('./self-approval.cjs');
+
+// What a self-approver may merge on the review's decision (see
+// self-approval.cjs), as the policy puts it, or nothing for anyone else.
+function selfApproval(author) {
+  const scope = selfApproverOf(author)?.scope.replace(/\.$/u, '');
+  if (!scope) return '';
+  return [
+    `The PR author may merge without a person only a change that is ${scope}.`,
+    'Anything else needs a person, even a simple, low-risk change the cases',
+    'above would clear; give as the reason what the change does beyond that.',
+  ].join('\n');
+}
 
 // The review policy every reviewer gets, with this PR's values filled in. The
-// caller's focus bullets extend the shared list, and the line drops out when
-// there are none. One pass, so a value cannot introduce another placeholder.
+// caller's focus bullets extend the shared list, and a self-approver's scope
+// narrows when a person is needed; each line drops out when empty. One pass,
+// so a value cannot introduce another placeholder.
+const optional = new Set(['focus', 'self_approval']);
+
 function policy(context, inputs, focus = '') {
   const pr = context.payload.pull_request;
   const values = {
@@ -18,11 +34,12 @@ function policy(context, inputs, focus = '') {
     head: pr.head.sha,
     inputs,
     focus: focus.trim() ? focus.trimEnd() : '',
+    self_approval: selfApproval(pr.user.login),
   };
   const text = fs.readFileSync(path.join(__dirname, 'policy.md'), 'utf8');
   return text.replaceAll(/\{\{(\w+)\}\}(\n?)/gu, (_, name, newline) => {
     if (!Object.hasOwn(values, name)) throw new Error(`policy.md has an unknown placeholder: {{${name}}}`);
-    return name === 'focus' && !values.focus ? '' : `${values[name]}${newline}`;
+    return optional.has(name) && !values[name] ? '' : `${values[name]}${newline}`;
   });
 }
 
