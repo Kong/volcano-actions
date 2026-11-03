@@ -105,7 +105,7 @@ headings.
 
 Everything this review writes is posted on the PR. When the change
 fixes or hardens a security control, say what it changes, such as
-"compare connect target hosts exactly", in the summary, the
+"check the upload size before reading the body", in the summary, the
 findings, and the questions for a person. Never name the weakness
 it closes, how to attack it, the data it would expose, or an input
 that would get past the control. A security problem the change
