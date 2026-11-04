@@ -16,7 +16,7 @@ const {
   isLiveHead,
 } = require('./github.cjs');
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
-const { namedReviewer, syncSelfApproval } = require('./self-approval.cjs');
+const { unwithdrawn, namedReviewer, withdrawStale, syncSelfApproval } = require('./self-approval.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
 const { reviewersOf } = require('./reviews.cjs');
 const { postFindings } = require('./findings.cjs');
@@ -96,15 +96,16 @@ async function liveOrNull({ github, context, core }, pull) {
 }
 
 // Sets the human status, once the summary says what a person decides, and asks
-// a reviewer when it waits. Says whether it set it.
+// a reviewer when it waits. Says whether it set it and settled the review's
+// own approval.
 async function settleHuman({ github, context, core }, pull, decision, live) {
   const sha = context.payload.pull_request.head.sha;
   try {
     const reasons = [...decision.reasons, ...live];
     const gate = await setHumanStatus(github, context, pull, sha, reasons, cutoff(decision));
-    await syncSelfApproval({ github, context, core }, pull, sha, gate);
+    const synced = await syncSelfApproval({ github, context, core }, pull, sha, gate);
     await requestReviewer(github, context, core, pull, sha, gate, decision.reviewer);
-    return true;
+    return synced;
   } catch (error) {
     core.setFailed(`The verdict is published, but the human review status failed: ${error.message}`);
     return false;
@@ -124,6 +125,22 @@ function warnUnread(core, reviewers) {
 // records when the deferral was made, which later events read back, and the
 // human status applies it.
 const unrecorded = 'The summary does not record the deferred finding(s) yet. If this stays, re-run the review.';
+
+// Sets the reviewed head's verdict. An approval the review gave an earlier
+// head goes first, and the verdict fails while it stays; one that passes only
+// because of a deferral is `held` failing until the deferral is recorded.
+async function setVerdict({ github, context, core }, pull, result) {
+  const withdrawn = await withdrawStale({ github, context, core }, pull);
+  const held = result.state === 'success' && result.deferred.length > 0;
+  await setStatus(
+    github,
+    context,
+    context.payload.pull_request.head.sha,
+    !withdrawn || held ? 'failure' : result.state,
+    withdrawn ? (held ? unrecorded : result.description) : unwithdrawn,
+  );
+  return { held, withdrawn };
+}
 
 // Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
 // head, then the summary comment, then each review's inline comments.
@@ -147,14 +164,7 @@ async function publish({ github, context, core }) {
   warnUnread(core, reviewers);
   const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
   // The status goes first so a failed comment cannot leave the head pending.
-  const held = result.state === 'success' && result.deferred.length > 0;
-  await setStatus(
-    github,
-    context,
-    pr.head.sha,
-    held ? 'failure' : result.state,
-    held ? unrecorded : result.description,
-  );
+  const { held, withdrawn } = await setVerdict({ github, context, core }, pull, result);
   reportIncomplete(core, pr.head.sha, result);
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
@@ -174,7 +184,8 @@ async function publish({ github, context, core }) {
     written = await dateDeferral({ github, context, core }, result, decision, written);
   }
   const settled = live !== null && (await settleHuman({ github, context, core }, pull, decision, live));
-  if (held && written && settled) await setStatus(github, context, pr.head.sha, 'success', result.description);
+  if (held && written && settled && withdrawn)
+    await setStatus(github, context, pr.head.sha, 'success', result.description);
   await postFindings({ github, context, core }, reviewers);
 }
 
@@ -215,7 +226,11 @@ async function override({ github, context, core }) {
     ...(await liveReasons(github, context, pull, pr.head.sha)),
   ];
   const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], cutoff(stored));
-  await syncSelfApproval({ github, context, core }, pull, pr.head.sha, gate);
+  // An approval that could not be withdrawn keeps the verdict failing.
+  if (!(await syncSelfApproval({ github, context, core }, pull, pr.head.sha, gate))) {
+    await removeOverrideLabel(github, context);
+    return;
+  }
   await setStatus(github, context, pr.head.sha, 'success', overriddenBy(sender.login));
   await removeOverrideLabel(github, context);
   await requestReviewer(github, context, core, pull, pr.head.sha, gate, stored?.reviewer);
