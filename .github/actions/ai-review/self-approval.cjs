@@ -56,6 +56,12 @@ function selfApprovers() {
 const selfApproverOf = (login) => (typeof login === 'string' && selfApprovers().get(login.toLowerCase())) || null;
 const isSelfApprover = (login) => selfApproverOf(login) !== null;
 
+// The scope a review of the author's PR weighs, which the summary records:
+// a self-approver's own, possibly empty, or null for anyone else. Enabling
+// self-approval or changing a scope then takes a new review before the
+// review approves an open PR.
+const scopeOf = (author) => selfApproverOf(author)?.scope ?? null;
+
 // The reviewer the caller names for the author's PRs, in the shape of the one
 // the review suggests, or null.
 function namedReviewer(author) {
@@ -78,7 +84,7 @@ const unwithdrawn = "Could not withdraw the AI review's approval. Re-run the rev
 
 // Dismisses each approval, failing the job for any it could not. Says whether
 // it dismissed them all.
-async function dismiss({ github, context, core }, pull, approvals, sha) {
+async function dismiss({ github, context, core }, pull, approvals) {
   let all = true;
   for (const r of approvals) {
     try {
@@ -86,7 +92,7 @@ async function dismiss({ github, context, core }, pull, approvals, sha) {
         ...context.repo,
         pull_number: pull.number,
         review_id: r.id,
-        message: dismissal(sha),
+        message: dismissal(r.commit_id),
         event: 'DISMISS',
       });
     } catch (error) {
@@ -97,14 +103,16 @@ async function dismiss({ github, context, core }, pull, approvals, sha) {
   return all;
 }
 
-// Withdraws the approvals this review gave of any commit but the live head,
-// which publish does before the head's verdict passes: the repositories keep
-// approvals across pushes, so one of an earlier head would otherwise let the
-// new head merge before its own approval is decided. Says whether none is
-// left; publish then fails the verdict instead. Unread reviews count as one
-// left only where the caller names self-approvers, so an outage elsewhere
-// keeps today's verdict.
-async function withdrawStale({ github, context, core }, pull) {
+// Withdraws the approvals this review gave before publish sets the verdict of
+// `sha`, so none stands while the new verdict passes: the repositories keep
+// approvals across pushes, and a review of the same head again, as after a
+// retarget, may now need a person. syncSelfApproval approves again once the
+// review clears the head. Only an approval of a live head the PR has moved
+// to stays, for that head's own review to decide. Says whether none is left;
+// publish then fails the verdict instead. Unread reviews count as one left
+// only where the caller names self-approvers, so an outage elsewhere keeps
+// today's verdict.
+async function withdrawBeforeVerdict({ github, context, core }, pull, sha) {
   let reviews;
   try {
     reviews = await github.paginate(github.rest.pulls.listReviews, {
@@ -116,8 +124,9 @@ async function withdrawStale({ github, context, core }, pull) {
     core.warning(`Could not read the reviews to withdraw an earlier approval: ${error.message}`);
     return selfApprovers().size === 0;
   }
-  const stale = reviews.filter((r) => isSelfApproval(r) && r.commit_id !== pull.head.sha);
-  return dismiss({ github, context, core }, pull, stale, pull.head.sha);
+  const kept = (r) => r.commit_id === pull.head.sha && pull.head.sha !== sha;
+  const given = reviews.filter((r) => isSelfApproval(r) && !kept(r));
+  return dismiss({ github, context, core }, pull, given);
 }
 
 // Whether someone other than this review dismissed its approval of `sha`. A
@@ -144,14 +153,15 @@ async function dismissedByPerson({ github, context, core }, pull, sha, reviews) 
 }
 
 // Approves the live head when its author is a self-approver, its verdict
-// passes, `clear` (see human.cjs) holds, and no person dismissed this
-// review's approval of it, and withdraws every other approval this review
+// passes, `clear` (see human.cjs) holds, its review weighed the author's
+// current scope (`scope`, as the summary records it), and no person dismissed
+// this review's approval of it, and withdraws every other approval this review
 // gave. A head the PR has moved past is left to its own review. A failed
 // withdrawal fails the job and the verdict, since the approval could let a
 // change merge that needs a person; a failed approval only warns. Says
 // whether every withdrawal succeeded, so a caller does not pass the verdict
 // after one failed.
-async function syncSelfApproval({ github, context, core }, pull, sha, { clear, reviews }) {
+async function syncSelfApproval({ github, context, core }, pull, sha, { clear, reviews }, scope = null) {
   if (pull.head.sha !== sha) return true;
   const given = reviews.filter((r) => isSelfApproval(r));
   const author = pull.user?.login;
@@ -159,10 +169,11 @@ async function syncSelfApproval({ github, context, core }, pull, sha, { clear, r
   const wanted =
     clear &&
     isSelfApprover(author) &&
+    selfApproverOf(author).scope === scope &&
     (await verdictState(github, context, sha)) === 'success' &&
     !(await dismissedByPerson({ github, context, core }, pull, sha, reviews));
   const stale = given.filter((g) => !wanted || g.commit_id !== sha);
-  if (!(await dismiss({ github, context, core }, pull, stale, sha))) {
+  if (!(await dismiss({ github, context, core }, pull, stale))) {
     const status = await verdictStatus(github, context, sha);
     await setStatus(github, context, sha, 'failure', unwithdrawn, statusContext, status?.target_url);
     return false;
@@ -186,8 +197,9 @@ module.exports = {
   selfApprovalMarker,
   unwithdrawn,
   selfApproverOf,
+  scopeOf,
   isSelfApprover,
   namedReviewer,
-  withdrawStale,
+  withdrawBeforeVerdict,
   syncSelfApproval,
 };

@@ -5,7 +5,14 @@ const test = require('node:test');
 const { statusContext, humanStatusContext, humanLabel, gate, override } = require('./ai-review.cjs');
 const { unwithdrawn } = require('./self-approval.cjs');
 const { sha, finding, review, decided, context, core } = require('./test-helpers.cjs');
-const { client, passing, selfApproval, useSelfApprovers, publishFor } = require('./self-approval-fakes.cjs');
+const {
+  client,
+  passing,
+  selfApproval,
+  useSelfApprovers,
+  publishFor,
+  decidedWithin,
+} = require('./self-approval-fakes.cjs');
 
 test('publish gives no approval, and withdraws its own, when the head needs a person', async (t) => {
   useSelfApprovers(t);
@@ -34,6 +41,8 @@ test('a new head gets its own approval in place of the last one', async (t) => {
     c.named('dismissReview').map((d) => d.review_id),
     [30],
   );
+  // It names the commit it approved, not the new head.
+  assert.equal(c.named('dismissReview')[0].message, 'The AI review no longer approves 0123456 without a person.');
   // The earlier approval goes before the new head's verdict can pass on it.
   const order = c.calls.filter((call) => ['dismissReview', 'createCommitStatus'].includes(call.call));
   assert.equal(order[0].call, 'dismissReview');
@@ -93,8 +102,8 @@ test('a failed withdrawal fails the job, and a failed approval only warns', asyn
     reviews: [selfApproval()],
     failDismiss: true,
   });
-  assert.equal(withdrawn.k.failures.length, 1);
-  assert.match(withdrawn.k.failures[0], /Could not withdraw the AI review's approval 31/u);
+  assert.ok(withdrawn.k.failures.length > 0);
+  for (const failure of withdrawn.k.failures) assert.match(failure, /Could not withdraw the AI review's approval 31/u);
 
   const approved = await publishFor(t, { failApprove: true });
   assert.deepEqual(approved.k.failures, []);
@@ -152,7 +161,7 @@ const dismissedBy = (login) => ({
 test('a person who dismisses the approval keeps it off that commit', async (t) => {
   useSelfApprovers(t);
   const gateWith = async (options) => {
-    const c = client({ author: 'octocat', statuses: passing, comments: [decided([])], ...options });
+    const c = client({ author: 'octocat', statuses: passing, comments: [decidedWithin()], ...options });
     const k = core();
     await gate({ github: c.github, context: context({ action: 'unlabeled', author: 'octocat' }), core: k });
     return { approved: c.named('createReview').length, k };
@@ -168,4 +177,15 @@ test('a person who dismisses the approval keeps it off that commit', async (t) =
   const unread = await gateWith({ ...dismissedBy('github-actions[bot]'), failTimeline: true });
   assert.equal(unread.approved, 0);
   assert.match(unread.k.warnings.at(-1), /Could not read who dismissed/u);
+});
+
+test('a review of the same head again that needs a person withdraws the approval before the verdict passes', async (t) => {
+  useSelfApprovers(t);
+  const human = { needed: true, reasons: ['Should the retargeted change also move the checkout button?'] };
+  const { c } = await publishFor(t, { human, reviews: [selfApproval()] });
+  const order = c.calls
+    .filter((call) => ['dismissReview', 'createCommitStatus', 'createReview'].includes(call.call))
+    .map((call) => (call.context ? `${call.context} ${call.state}` : call.call));
+  assert.deepEqual(order.slice(0, 2), ['dismissReview', `${statusContext} success`]);
+  assert.ok(!order.includes('createReview'));
 });

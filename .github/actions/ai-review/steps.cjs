@@ -16,7 +16,7 @@ const {
   isLiveHead,
 } = require('./github.cjs');
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
-const { unwithdrawn, namedReviewer, withdrawStale, syncSelfApproval } = require('./self-approval.cjs');
+const { unwithdrawn, scopeOf, namedReviewer, withdrawBeforeVerdict, syncSelfApproval } = require('./self-approval.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
 const { reviewersOf } = require('./reviews.cjs');
 const { postFindings } = require('./findings.cjs');
@@ -103,7 +103,7 @@ async function settleHuman({ github, context, core }, pull, decision, live) {
   try {
     const reasons = [...decision.reasons, ...live];
     const gate = await setHumanStatus(github, context, pull, sha, reasons, cutoff(decision));
-    const synced = await syncSelfApproval({ github, context, core }, pull, sha, gate);
+    const synced = await syncSelfApproval({ github, context, core }, pull, sha, gate, decision.scope);
     await requestReviewer(github, context, core, pull, sha, gate, decision.reviewer);
     return synced;
   } catch (error) {
@@ -126,11 +126,11 @@ function warnUnread(core, reviewers) {
 // human status applies it.
 const unrecorded = 'The summary does not record the deferred finding(s) yet. If this stays, re-run the review.';
 
-// Sets the reviewed head's verdict. An approval the review gave an earlier
-// head goes first, and the verdict fails while it stays; one that passes only
+// Sets the reviewed head's verdict. The approvals the review gave go first,
+// and the verdict fails while one stays; one that passes only
 // because of a deferral is `held` failing until the deferral is recorded.
 async function setVerdict({ github, context, core }, pull, result) {
-  const withdrawn = await withdrawStale({ github, context, core }, pull);
+  const withdrawn = await withdrawBeforeVerdict({ github, context, core }, pull, context.payload.pull_request.head.sha);
   const held = result.state === 'success' && result.deferred.length > 0;
   await setStatus(
     github,
@@ -173,6 +173,7 @@ async function publish({ github, context, core }) {
     reasons: [...result.reasons, ...paths],
     reviewer: namedReviewer(pr.user.login) ?? result.reviewer,
     deferred: result.deferred ?? [],
+    scope: scopeOf(pr.user.login),
   };
   const live = await liveOrNull({ github, context, core }, pull);
   // A reserved path or the needs-human-review label asks a person whatever
@@ -227,7 +228,7 @@ async function override({ github, context, core }) {
   ];
   const gate = await setHumanStatus(github, context, pull, pr.head.sha, [...new Set(reasons)], cutoff(stored));
   // An approval that could not be withdrawn keeps the verdict failing.
-  if (!(await syncSelfApproval({ github, context, core }, pull, pr.head.sha, gate))) {
+  if (!(await syncSelfApproval({ github, context, core }, pull, pr.head.sha, gate, stored?.scope))) {
     await removeOverrideLabel(github, context);
     return;
   }
@@ -265,7 +266,7 @@ async function gate({ github, context, core }) {
     }
     const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
     const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], cutoff(stored));
-    await syncSelfApproval({ github, context, core }, pull, pull.head.sha, status);
+    await syncSelfApproval({ github, context, core }, pull, pull.head.sha, status, stored?.scope);
     await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
   }
 }

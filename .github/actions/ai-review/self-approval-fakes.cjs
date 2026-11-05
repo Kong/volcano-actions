@@ -8,6 +8,7 @@ const {
   sha,
   output,
   routine,
+  decided,
   claudeReviews,
   clearAfter,
   client: baseClient,
@@ -78,4 +79,15 @@ async function publishFor(t, { human = routine, findings = [], candidates, ...op
   return { c, k };
 }
 
-module.exports = { client, passing, selfApproval, approvers, useSelfApprovers, publishFor };
+// The summary comment of a review that cleared the head and weighed `scope`,
+// octocat's by default.
+function decidedWithin(scope = 'a change only to styling') {
+  const comment = decided([]);
+  const body = comment.body.replace(/<!-- ai-review-human (\S+) -->$/u, (_, encoded) => {
+    const decision = { ...JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')), scope };
+    return `<!-- ai-review-human ${Buffer.from(JSON.stringify(decision)).toString('base64')} -->`;
+  });
+  return { ...comment, body };
+}
+
+module.exports = { client, passing, selfApproval, approvers, useSelfApprovers, publishFor, decidedWithin };

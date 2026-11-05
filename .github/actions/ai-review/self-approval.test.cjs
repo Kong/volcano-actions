@@ -2,11 +2,19 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { humanStatusContext, gate } = require('./ai-review.cjs');
+const { statusContext, humanStatusContext, gate } = require('./ai-review.cjs');
 const { policy } = require('./prepare.cjs');
 const { selfApprovalMarker, selfApproverOf } = require('./self-approval.cjs');
 const { sha, decided, context, core } = require('./test-helpers.cjs');
-const { client, passing, selfApproval, approvers, useSelfApprovers, publishFor } = require('./self-approval-fakes.cjs');
+const {
+  client,
+  passing,
+  selfApproval,
+  approvers,
+  useSelfApprovers,
+  publishFor,
+  decidedWithin,
+} = require('./self-approval-fakes.cjs');
 
 test("publish approves a self-approver's head when nothing calls for a person", async (t) => {
   useSelfApprovers(t);
@@ -22,11 +30,16 @@ test("publish approves a self-approver's head when nothing calls for a person", 
   // The approval is not a person's: the human status stays the review's call.
   assert.deepEqual(c.set(humanStatusContext), [[sha, 'success', 'No human review needed.']]);
 
-  // Logins match without regard to case, and an approval of the head stays.
+  // Logins match without regard to case. A review of the same head again
+  // withdraws its approval before the verdict, and approves once it clears.
   process.env.SELF_APPROVERS = 'OctoCat: a change only to styling';
   const again = await publishFor(t, { reviews: [selfApproval()] });
-  assert.deepEqual(again.c.named('createReview'), []);
-  assert.deepEqual(again.c.named('dismissReview'), []);
+  const order = again.c.calls
+    .filter((call) => ['dismissReview', 'createCommitStatus', 'createReview'].includes(call.call))
+    .map((call) => (call.context ? `${call.context} ${call.state}` : call.call));
+  assert.deepEqual(order.slice(0, 2), ['dismissReview', `${statusContext} success`]);
+  assert.equal(order.at(-1), 'createReview');
+  assert.equal(again.c.named('dismissReview')[0].message, 'The AI review no longer approves abcdef1 without a person.');
 });
 
 test('publish approves only self-approvers', async (t) => {
@@ -42,7 +55,7 @@ test('publish approves only self-approvers', async (t) => {
 
 test('gate approves again once the label comes off', async (t) => {
   useSelfApprovers(t);
-  const c = client({ author: 'octocat', statuses: passing, comments: [decided([])] });
+  const c = client({ author: 'octocat', statuses: passing, comments: [decidedWithin()] });
   await gate({ github: c.github, context: context({ action: 'unlabeled', author: 'octocat' }), core: core() });
   assert.deepEqual(
     c.named('createReview').map((r) => [r.commit_id, r.event]),
@@ -113,4 +126,26 @@ test("a self-approver's named reviewer is the one asked when their PR needs a pe
     own.c.named('requestReviewers').map((r) => r.reviewers),
     [['bob']],
   );
+});
+
+test("the review approves only a head whose review weighed the author's current scope", async (t) => {
+  useSelfApprovers(t);
+  const approvedWith = async (comment) => {
+    const c = client({ author: 'octocat', statuses: passing, comments: [comment] });
+    await gate({ github: c.github, context: context({ action: 'unlabeled', author: 'octocat' }), core: core() });
+    return c.named('createReview').length;
+  };
+  assert.equal(await approvedWith(decidedWithin()), 1);
+  // Reviewed before self-approval was enabled, or under another scope.
+  assert.equal(await approvedWith(decided([])), 0);
+  assert.equal(await approvedWith(decidedWithin('a change only to copy')), 0);
+
+  // publish records the scope it weighed for a self-approver only.
+  const recorded = async (author) => {
+    const { c } = await publishFor(t, { author });
+    const body = [...c.named('createComment'), ...c.named('updateComment')].at(-1).body;
+    return JSON.parse(Buffer.from(body.match(/<!-- ai-review-human (\S+) -->$/u)[1], 'base64').toString('utf8')).scope;
+  };
+  assert.equal(await recorded('octocat'), 'a change only to styling');
+  assert.equal(await recorded('someone'), undefined);
 });

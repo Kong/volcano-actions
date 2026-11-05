@@ -11,9 +11,10 @@ const { clean, code } = require('./constants.cjs');
 // `deferred` names the problems the author deferred, by their keys (see
 // problems.cjs), and `since`, when GitHub recorded the summary that first
 // reported them, says only an approval of this commit given after then counts
-// (see deferral.cjs).
-const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null, deferred = [] }) =>
-  `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since, deferred })).toString('base64')} -->`;
+// (see deferral.cjs). `scope`, only for a self-approver's PR, is the scope
+// the review weighed (see self-approval.cjs).
+const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null, deferred = [], scope = null }) =>
+  `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since, deferred, ...(scope !== null && { scope }) })).toString('base64')} -->`;
 
 // The person is asked to decide the reasons, not to repeat the review. When
 // the code is cleared (see publish), the comment says so.
@@ -55,6 +56,7 @@ function storedDecision(comment, sha) {
         reviewer: typeof login === 'string' ? { login, why: String(decision.reviewer.why) } : null,
         since: typeof decision.since === 'string' ? decision.since : null,
         deferred: Array.isArray(decision.deferred) ? decision.deferred.map(String) : [],
+        scope: typeof decision.scope === 'string' ? decision.scope : null,
       };
     }
   } catch {}
