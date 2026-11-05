@@ -171,9 +171,9 @@ async function publish({ github, context, core }) {
   const paths = await pathReasons(github, context, pr.number);
   const decision = {
     reasons: [...result.reasons, ...paths],
-    reviewer: namedReviewer(pr.user.login) ?? result.reviewer,
+    reviewer: namedReviewer(pr.user) ?? result.reviewer,
     deferred: result.deferred ?? [],
-    scope: scopeOf(pr.user.login),
+    scope: scopeOf(pr.user),
   };
   const live = await liveOrNull({ github, context, core }, pull);
   // A reserved path or the needs-human-review label asks a person whatever

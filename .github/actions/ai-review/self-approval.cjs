@@ -12,6 +12,9 @@ const { setStatus, verdictStatus, verdictState } = require('./github.cjs');
 // - The scope completes "a change that is ..." and narrows what the author
 //   may merge without a person (see prepare.cjs). Without one, the review's
 //   usual decision applies. An indented line continues the scope above it.
+// - Each line for a login adds a scope, and `*` lines add theirs for every
+//   author who is a person, not a bot. An author's PR may then merge any
+//   change within one of their scopes.
 // - The reviewer, when named, is the one asked whenever the author's PR
 //   needs a person, in place of the one the review suggests.
 // - A line that does not parse names nobody, so a typo can only withhold an
@@ -34,39 +37,60 @@ const { setStatus, verdictStatus, verdictState } = require('./github.cjs');
 const bot = 'github-actions[bot]';
 const selfApprovalMarker = '<!-- ai-review-self-approval -->';
 const entryPattern =
-  /^(?<login>[A-Za-z0-9-]+)(?:\s*,\s*reviewed by\s+(?<reviewer>[A-Za-z0-9-]+))?\s*(?::\s*(?<scope>.*))?$/u;
+  /^(?<login>\*|[A-Za-z0-9-]+)(?:\s*,\s*reviewed by\s+(?<reviewer>[A-Za-z0-9-]+))?\s*(?::\s*(?<scope>.*))?$/u;
 
-// Each self-approver by lowercase login, with their scope and reviewer.
+// Each entry by lowercase login, or `*`, with the scopes its lines give and
+// the first reviewer they name.
 function selfApprovers() {
   const entries = new Map();
   let last = null;
   for (const line of (process.env.SELF_APPROVERS || '').split('\n')) {
     if (!line.trim()) continue;
     if (/^\s/u.test(line)) {
-      if (last) last.scope = `${last.scope} ${line.trim()}`.trim();
+      if (last) last.scopes.push(`${last.scopes.pop()} ${line.trim()}`.trim());
       continue;
     }
     const match = entryPattern.exec(line.trim());
-    last = match && { scope: (match.groups.scope ?? '').trim(), reviewer: match.groups.reviewer ?? null };
-    if (last) entries.set(match.groups.login.toLowerCase(), last);
+    if (!match) {
+      last = null;
+      continue;
+    }
+    const login = match.groups.login.toLowerCase();
+    last = entries.get(login) ?? { scopes: [], reviewer: null };
+    last.scopes.push((match.groups.scope ?? '').trim());
+    last.reviewer ??= match.groups.reviewer ?? null;
+    entries.set(login, last);
   }
   return entries;
 }
 
-const selfApproverOf = (login) => (typeof login === 'string' && selfApprovers().get(login.toLowerCase())) || null;
-const isSelfApprover = (login) => selfApproverOf(login) !== null;
+// What the PR author `user` may merge on the review's decision: the scopes of
+// their own lines and, for a person, the `*` lines, with their reviewer, or
+// null when no line covers them. An empty scope among them leaves the
+// review's usual decision, so `scopes` is then empty.
+function selfApproverOf(user) {
+  if (typeof user?.login !== 'string') return null;
+  const entries = selfApprovers();
+  const own = entries.get(user.login.toLowerCase());
+  const anyone = user.type === 'User' ? entries.get('*') : undefined;
+  if (!own && !anyone) return null;
+  const scopes = [...(own?.scopes ?? []), ...(anyone?.scopes ?? [])];
+  return { scopes: scopes.includes('') ? [] : [...new Set(scopes)], reviewer: own?.reviewer ?? null };
+}
 
-// The scope a review of the author's PR weighs, which the summary records:
-// a self-approver's own, possibly empty, or null for anyone else. Enabling
+const isSelfApprover = (user) => selfApproverOf(user) !== null;
+
+// The scopes a review of the author's PR weighs, which the summary records:
+// a self-approver's, possibly none, or null for anyone else. Enabling
 // self-approval or changing a scope then takes a new review before the
 // review approves an open PR.
-const scopeOf = (author) => selfApproverOf(author)?.scope ?? null;
+const scopeOf = (user) => selfApproverOf(user)?.scopes.join('\n') ?? null;
 
 // The reviewer the caller names for the author's PRs, in the shape of the one
 // the review suggests, or null.
-function namedReviewer(author) {
-  const login = selfApproverOf(author)?.reviewer;
-  return login ? { login, why: `reviews what ${author} may not merge alone` } : null;
+function namedReviewer(user) {
+  const login = selfApproverOf(user)?.reviewer;
+  return login ? { login, why: `reviews what ${user.login} may not merge alone` } : null;
 }
 
 // The approvals this review gave, standing or dismissed.
@@ -164,12 +188,12 @@ async function dismissedByPerson({ github, context, core }, pull, sha, reviews) 
 async function syncSelfApproval({ github, context, core }, pull, sha, { clear, reviews }, scope = null) {
   if (pull.head.sha !== sha) return true;
   const given = reviews.filter((r) => isSelfApproval(r));
-  const author = pull.user?.login;
+  const author = pull.user;
   // Only a self-approver's clear head costs the reads that follow.
   const wanted =
     clear &&
     isSelfApprover(author) &&
-    selfApproverOf(author).scope === scope &&
+    scopeOf(author) === scope &&
     (await verdictState(github, context, sha)) === 'success' &&
     !(await dismissedByPerson({ github, context, core }, pull, sha, reviews));
   const stale = given.filter((g) => !wanted || g.commit_id !== sha);
@@ -188,7 +212,7 @@ async function syncSelfApproval({ github, context, core }, pull, sha, { clear, r
       body: approvalBody(pull, sha),
     });
   } catch (error) {
-    core.warning(`Could not approve ${sha.slice(0, 7)} for ${author}: ${error.message}`);
+    core.warning(`Could not approve ${sha.slice(0, 7)} for ${author.login}: ${error.message}`);
   }
   return true;
 }

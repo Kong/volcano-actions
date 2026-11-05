@@ -93,14 +93,44 @@ test('the self-approvers parse one per line, and a line that does not parse name
       'monalisa reviewed by octocat: anything',
     ].join('\n'),
   );
-  assert.deepEqual(selfApproverOf('octocat'), {
-    scope: 'a change only to docs: guides and examples, with no change to code',
+  const person = (login) => ({ login, type: 'User' });
+  assert.deepEqual(selfApproverOf(person('octocat')), {
+    scopes: ['a change only to docs: guides and examples, with no change to code'],
     reviewer: null,
   });
-  assert.deepEqual(selfApproverOf('hubot'), { scope: '', reviewer: 'octocat' });
-  assert.equal(selfApproverOf('not'), null);
-  assert.equal(selfApproverOf('monalisa'), null);
+  // A line with no scope leaves the review's usual decision.
+  assert.deepEqual(selfApproverOf(person('hubot')), { scopes: [], reviewer: 'octocat' });
+  assert.equal(selfApproverOf(person('not')), null);
+  assert.equal(selfApproverOf(person('monalisa')), null);
   assert.equal(selfApproverOf(null), null);
+});
+
+test('`*` lines add their scopes for every person, and a login may have several', (t) => {
+  useSelfApprovers(
+    t,
+    [
+      'hubot, reviewed by octocat: a change only to user-facing copy',
+      '*: a feature behind a flag',
+      'hubot: a change only to styling',
+    ].join('\n'),
+  );
+  assert.deepEqual(selfApproverOf({ login: 'hubot', type: 'User' }), {
+    scopes: ['a change only to user-facing copy', 'a change only to styling', 'a feature behind a flag'],
+    reviewer: 'octocat',
+  });
+  assert.deepEqual(selfApproverOf({ login: 'monalisa', type: 'User' }), {
+    scopes: ['a feature behind a flag'],
+    reviewer: null,
+  });
+  // Bots get only lines that name them.
+  assert.equal(selfApproverOf({ login: 'dependabot[bot]', type: 'Bot' }), null);
+  assert.equal(selfApproverOf({ login: 'Copilot', type: 'Bot' }), null);
+
+  // The policy lists each scope.
+  assert.match(
+    policy(context({ author: 'hubot' }), '/in'),
+    /evidence either way\.\nThe PR author may merge without a person only a change that is one of:\n- a change only to user-facing copy\n- a change only to styling\n- a feature behind a flag\nAnything else needs a person/u,
+  );
 });
 
 test("a self-approver's named reviewer is the one asked when their PR needs a person", async (t) => {

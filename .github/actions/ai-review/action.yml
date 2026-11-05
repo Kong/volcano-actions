@@ -21,7 +21,7 @@ inputs:
     description: For publish, newline-separated globs of paths whose changes need a human review.
     default: ''
   self-approvers:
-    description: For prepare, publish, override, and gate, the authors whose PRs the review approves itself when nothing calls for a person, for repositories that keep required approvals. One per line, as `login` or `login, reviewed by login`, then optionally `:` and the only changes they may merge without a person, completing "a change that is ...". The named reviewer is asked whenever their PR needs a person. Without it, the review only withdraws approvals it gave.
+    description: For prepare, publish, override, and gate, the authors whose PRs the review approves itself when nothing calls for a person, for repositories that keep required approvals. One per line, as `login` or `login, reviewed by login`, then optionally `:` and a change they may merge without a person, completing "a change that is ...". Each line adds a scope, and `*` lines add theirs for every author who is a person. The named reviewer is asked whenever their PR needs a person. Without it, the review only withdraws approvals it gave.
     default: ''
 
 outputs:

@@ -9,10 +9,12 @@ const { selfApproverOf } = require('./self-approval.cjs');
 // What a self-approver may merge on the review's decision (see
 // self-approval.cjs), as the policy puts it, or nothing for anyone else.
 function selfApproval(author) {
-  const scope = selfApproverOf(author)?.scope.replace(/\.$/u, '');
-  if (!scope) return '';
+  const scopes = (selfApproverOf(author)?.scopes ?? []).map((s) => s.replace(/\.$/u, ''));
+  if (scopes.length === 0) return '';
   return [
-    `The PR author may merge without a person only a change that is ${scope}.`,
+    ...(scopes.length === 1
+      ? [`The PR author may merge without a person only a change that is ${scopes[0]}.`]
+      : ['The PR author may merge without a person only a change that is one of:', ...scopes.map((s) => `- ${s}`)]),
     'Anything else needs a person, even a simple, low-risk change the cases',
     'above would clear; give as the reason what the change does beyond that.',
   ].join('\n');
@@ -34,7 +36,7 @@ function policy(context, inputs, focus = '') {
     head: pr.head.sha,
     inputs,
     focus: focus.trim() ? focus.trimEnd() : '',
-    self_approval: selfApproval(pr.user.login),
+    self_approval: selfApproval(pr.user),
   };
   const text = fs.readFileSync(path.join(__dirname, 'policy.md'), 'utf8');
   return text.replaceAll(/\{\{(\w+)\}\}(\n?)/gu, (_, name, newline) => {

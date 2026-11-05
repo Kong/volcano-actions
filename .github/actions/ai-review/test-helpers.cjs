@@ -134,7 +134,7 @@ const livePull = (o, number) => ({
   draft: o.draft,
   state: o.state,
   labels: o.labels,
-  user: { login: o.author ?? 'author' },
+  user: { login: o.author ?? 'author', type: o.authorType ?? 'User' },
   requested_reviewers: o.requested,
   requested_teams: o.requestedTeams,
   head: {
@@ -248,7 +248,7 @@ function context({
       pull_request: {
         number: 7,
         draft,
-        user: { login: author },
+        user: { login: author, type: 'User' },
         base: { ref: 'main' },
         head: { sha, repo: headRepo && { full_name: headRepo } },
       },
