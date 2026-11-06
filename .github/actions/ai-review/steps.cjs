@@ -9,6 +9,8 @@ const {
   removeOverrideLabel,
   summaryComment,
   verdictState,
+  verdictStatus,
+  isLavaFlowSkip,
   permissionOf,
   livePull,
   isFork,
@@ -240,8 +242,9 @@ async function gate({ github, context, core }) {
     const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
     if (pull.state !== 'open') continue;
     const stored = storedDecision(await summaryComment(github, context, number), pull.head.sha);
-    // Its review sets the status when it lands, reading the reviews then.
-    if (!stored && !isFork(context, pull)) {
+    // Its review sets the status when it lands, reading the reviews then. A
+    // fork, or a head passed on LavaFlow's review, has no review to wait for.
+    if (!stored && !isFork(context, pull) && !isLavaFlowSkip(await verdictStatus(github, context, pull.head.sha))) {
       core.notice(`Leaving ${pull.head.sha.slice(0, 7)} of #${number} to its review, which has not finished.`);
       continue;
     }

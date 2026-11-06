@@ -99,6 +99,7 @@ person's review. It waits for one when:
 - The change touches a path the repository lists in `human_review_paths`.
 - Someone adds the `needs-human-review` label.
 - The verdict was overridden, or the PR comes from a fork.
+- LavaFlow's review of the head stood in for the AI review (see below).
 
 It passes when none applies, or once a collaborator with write access other
 than the author approves. Like the repositories' required approvals today, an
@@ -138,6 +139,34 @@ already requested by name or has reviewed. When an approval no longer counts
 because of a deferral, it asks that approver again instead. A team request, such as from
 CODEOWNERS, does not count, so a repository that opts in can drop a catch-all
 CODEOWNERS line.
+
+### PRs LavaFlow reviewed
+
+LavaFlow opens fix PRs from one of Volcano's GitHub Apps, and reviews each head
+it pushes in a comment review from the same App. The AI review skips a head
+LavaFlow reviewed, only when all of these hold:
+
+- The PR's author is a bot whose login is exactly one of LavaFlow's Apps:
+  `volcano-github-app[bot]` or `volcano-staging[bot]`. A login that only
+  resembles one, or an account of another type, does not count.
+- The same App posted a comment review of the PR's current head. GitHub names
+  `web-flow` as the committer of an App's commits, so only the review's commit
+  ties it to the head. Any other head is reviewed as usual, including a
+  person's commit on the branch and an App commit LavaFlow has not reviewed
+  yet.
+- The AI review has not reached a verdict for that head. A re-run or a later
+  event reviews it again rather than replace that verdict.
+
+The skip passes `ai-review/verdict` as "Skipped: LavaFlow reviewed `<sha>`
+(review `<id>`).", linked to that review. It never stands in for a person:
+`ai-review/human` waits with "LavaFlow reviewed `<sha>` in place of the AI
+review." as its reason, and passes only by the rules above, once a
+collaborator with write access other than the author approves. The skip posts
+no summary comment and requests nobody by name. When reading the PR's reviews
+or statuses fails, the head is reviewed as usual.
+
+A run that starts before LavaFlow's review of its head exists reviews the
+head as usual, and its verdict stands.
 
 ### Setup
 

@@ -21,6 +21,11 @@ const overridePrefix = 'Failing verdict overridden by ';
 const overriddenBy = (login) => `${overridePrefix}${login}.`;
 const incomplete = 'Review did not complete. Re-run it, or have a writer approve this commit.';
 const approvedPrefix = 'Review did not complete; approved by ';
+// The verdict for a head whose LavaFlow review stands in for the AI review,
+// and the reason it still needs a person (see lavaflow.cjs).
+const lavaflowPrefix = 'Skipped: LavaFlow reviewed ';
+const lavaflowSkipped = (sha, reviewId) => `${lavaflowPrefix}${sha.slice(0, 7)} (review ${reviewId}).`;
+const lavaflowReason = (sha) => `LavaFlow reviewed ${sha.slice(0, 7)} in place of the AI review.`;
 // Commit status descriptions are capped at 140 characters.
 const fit = (text) => (text.length <= 140 ? text : `${text.slice(0, 139)}…`);
 
@@ -48,6 +53,9 @@ module.exports = {
   overriddenBy,
   incomplete,
   approvedPrefix,
+  lavaflowPrefix,
+  lavaflowSkipped,
+  lavaflowReason,
   fit,
   clean,
   code,

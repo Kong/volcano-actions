@@ -1,6 +1,15 @@
 'use strict';
 
-const { statusContext, overrideLabel, humanLabel, marker, overridePrefix, runUrl } = require('./constants.cjs');
+const {
+  statusContext,
+  overrideLabel,
+  humanLabel,
+  marker,
+  overridePrefix,
+  lavaflowPrefix,
+  lavaflowReason,
+  runUrl,
+} = require('./constants.cjs');
 
 async function setStatus(github, context, sha, state, description, name = statusContext, targetUrl = runUrl(context)) {
   await github.rest.repos.createCommitStatus({
@@ -46,6 +55,10 @@ async function verdictState(github, context, sha) {
   return (await verdictStatus(github, context, sha))?.state ?? 'none';
 }
 
+// Whether a verdict passed the head on LavaFlow's review (see lavaflow.cjs).
+const isLavaFlowSkip = (status) =>
+  status?.state === 'success' && Boolean(status.description?.startsWith(lavaflowPrefix));
+
 async function permissionOf(github, context, username) {
   try {
     const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...context.repo, username });
@@ -73,6 +86,7 @@ async function liveReasons(github, context, pull, sha) {
   if (isFork(context, pull)) reasons.push('The AI review does not run on fork PRs.');
   const status = await verdictStatus(github, context, sha);
   if (status?.state === 'success' && status.description?.startsWith(overridePrefix)) reasons.push(status.description);
+  if (isLavaFlowSkip(status)) reasons.push(lavaflowReason(sha));
   if (pull.labels?.some((l) => l.name === humanLabel)) reasons.push(`The ${humanLabel} label asks for one.`);
   return reasons;
 }
@@ -91,6 +105,7 @@ module.exports = {
   summaryComment,
   verdictStatus,
   verdictState,
+  isLavaFlowSkip,
   permissionOf,
   canWrite,
   livePull,
