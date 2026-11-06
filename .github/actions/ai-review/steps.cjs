@@ -7,7 +7,14 @@ const { flagReasons } = require('./flag-gates.cjs');
 const { decisionMarker, humanSection } = require('./decision.cjs');
 const { setStatus, summaryComment, livePull, liveReasons, isLiveHead } = require('./github.cjs');
 const { setHumanStatus, requestReviewer } = require('./human.cjs');
-const { unwithdrawn, scopeOf, namedReviewer, withdrawBeforeVerdict, syncSelfApproval } = require('./self-approval.cjs');
+const {
+  unwithdrawn,
+  scopeOf,
+  namedReviewer,
+  withdrawBeforeVerdict,
+  syncSelfApproval,
+  selfApprovalsConfigured,
+} = require('./self-approval.cjs');
 const { reviewerCandidates } = require('./candidates.cjs');
 const { ownerGroups } = require('./owners.cjs');
 const { reviewersOf } = require('./reviews.cjs');
@@ -121,17 +128,29 @@ function warnUnread(core, reviewers) {
 // human status applies it.
 const unrecorded = 'The summary does not record the deferred finding(s) yet. If this stays, re-run the review.';
 
+// Where authors may self-approve, a verdict passes only once the summary
+// records the decision behind it: otherwise later events would act on an
+// earlier review's decision for the same head.
+const undecided = "The summary does not record this review's decision. Re-run the review.";
+
 // Sets the reviewed head's verdict, which fails while an approval the review
-// gave could not be withdrawn; one that passes only because of a deferral is
-// `held` failing until the deferral is recorded.
-async function setVerdict({ github, context }, result, withdrawn) {
+// gave could not be withdrawn or, where authors self-approve, while the
+// decision is not recorded (`written`); one that passes only because of a
+// deferral is `held` failing until the deferral is recorded.
+async function setVerdict({ github, context }, result, withdrawn, written) {
   const held = result.state === 'success' && result.deferred.length > 0;
+  const recorded = Boolean(written) || !selfApprovalsConfigured();
+  let description = result.description;
+  if (!withdrawn) description = unwithdrawn;
+  else if (!recorded) description = undecided;
+  else if (held) description = unrecorded;
+  const passing = withdrawn && recorded && !held;
   await setStatus(
     github,
     context,
     context.payload.pull_request.head.sha,
-    !withdrawn || held ? 'failure' : result.state,
-    withdrawn ? (held ? unrecorded : result.description) : unwithdrawn,
+    passing ? result.state : 'failure',
+    description,
   );
   return held;
 }
@@ -198,15 +217,16 @@ async function publish({ github, context, core }) {
   const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
   // The approvals the review gave go before anything passes. The summary then
   // records the new decision while start's pending verdict still holds the
-  // head, so a gate run never pairs a passing verdict with an earlier review's
-  // decision. The verdict is set whatever the summary does.
+  // head, so a gate run that starts after the verdict passes reads the new
+  // decision; gate checks again for one that started before (see events.cjs).
+  // The verdict is set whatever the summary does.
   const withdrawn = await withdrawBeforeVerdict({ github, context, core }, pull, pr.head.sha);
   let recorded = null;
   let held = false;
   try {
     recorded = await recordDecision({ github, context, core }, pull, result, reviewers);
   } finally {
-    held = await setVerdict({ github, context }, result, withdrawn);
+    held = await setVerdict({ github, context }, result, withdrawn, recorded?.written);
   }
   reportIncomplete(core, pr.head.sha, result);
   const { decision, live, written } = recorded;

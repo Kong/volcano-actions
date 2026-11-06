@@ -34,13 +34,19 @@ function useFlags(t, check = 'useFeatureFlags|requireFeature') {
 
 // Publishes a review of monalisa's PR, or `author`'s, that clears it with
 // `human`, and returns its human status and whether the review approved it.
-async function publishFlagged(t, human, { files = [edited], author = 'monalisa', failContent = false } = {}) {
+async function publishFlagged(
+  t,
+  human,
+  { files = [edited], author = 'monalisa', failContent = false, served = null } = {},
+) {
   claudeReviews(t, 'success', output([], 'Adds the new page behind beta.', human));
   const c = client({ author, statuses: passing, files });
   c.github.rest.repos.getContent = (args) => {
     c.calls.push({ ...args, call: 'getContent' });
     if (failContent || args.path !== 'src/page.tsx') return Promise.reject(new Error('Not Found'));
-    return Promise.resolve({ data: { encoding: 'base64', content: Buffer.from(page.join('\n')).toString('base64') } });
+    return Promise.resolve({
+      data: { path: served ?? args.path, encoding: 'base64', content: Buffer.from(page.join('\n')).toString('base64') },
+    });
   };
   await publish({ github: c.github, context: context({ author }), core: core() });
   return { status: c.set(humanStatusContext)[0][2], approved: c.named('createReview').length === 1 };
@@ -131,4 +137,15 @@ test('only a scope behind a feature flag asks for the case and its checks', (t) 
   useSelfApprovers(t, 'octocat: a change only to styling');
   assert.deepEqual(schemas({ login: 'octocat', type: 'User' }), schemas());
   assert.doesNotMatch(policy(context({ author: 'octocat' }), '/in'), /within/u);
+});
+
+test('a cited path must be the file GitHub names', async (t) => {
+  useFlags(t);
+  for (const path of ['./src/page.tsx', 'src//page.tsx', 'src/../src/page.tsx', '/src/page.tsx']) {
+    const { status } = await publishFlagged(t, cleared(1, [{ ...gate, path }]));
+    assert.match(status, /which is not a path as the PR's files name it/u, path);
+  }
+  // GitHub serving another spelling of the file leaves the citation unverified.
+  const { status } = await publishFlagged(t, cleared(1), { served: 'src/Page.tsx' });
+  assert.match(status, /Could not read src\/page\.tsx:2/u);
 });

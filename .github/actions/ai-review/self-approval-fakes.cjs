@@ -19,12 +19,12 @@ const {
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
 // The shared client, with the review writes this feature makes, which fail
-// when `failApprove` or `failDismiss` is set. A dismissal shows in later reads
-// of the reviews, and the timeline lists `timeline`, or fails with
-// `failTimeline`.
+// when `failApprove` or `failDismiss` is set. An approval or a dismissal shows
+// in later reads of the reviews, and the timeline lists `timeline`, or fails
+// with `failTimeline`.
 function client({ failApprove = false, failDismiss = false, timeline = [], failTimeline = false, ...options } = {}) {
-  const reviews = options.reviews?.map((r) => ({ ...r }));
-  const c = baseClient({ ...options, ...(reviews && { reviews }) });
+  const reviews = (options.reviews ?? []).map((r) => ({ ...r }));
+  const c = baseClient({ ...options, reviews });
   const write =
     (call, failure, then = () => {}) =>
     (args) => {
@@ -34,9 +34,12 @@ function client({ failApprove = false, failDismiss = false, timeline = [], failT
       return Promise.resolve({ data: {} });
     };
   const { rest, paginate } = c.github;
-  rest.pulls.createReview = write('createReview', failApprove && ['Unprocessable Entity', 422]);
+  rest.pulls.createReview = write('createReview', failApprove && ['Unprocessable Entity', 422], (args) => {
+    const given = selfApproval(args.commit_id, 100 + reviews.length);
+    reviews.push({ ...given, body: args.body });
+  });
   rest.pulls.dismissReview = write('dismissReview', failDismiss && ['Forbidden', 403], (args) => {
-    const r = reviews?.find((g) => g.id === args.review_id);
+    const r = reviews.find((g) => g.id === args.review_id);
     if (r) r.state = 'DISMISSED';
   });
   rest.issues.listEventsForTimeline = () => {};

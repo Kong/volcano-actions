@@ -98,6 +98,9 @@ function selfApproverOf(user) {
 
 const isSelfApprover = (user) => selfApproverOf(user) !== null;
 
+// Whether the caller lets any author self-approve.
+const selfApprovalsConfigured = () => selfApprovers().size > 0;
+
 // The scopes a review of the author's PR weighs, which the summary records:
 // a self-approver's, possibly none, or null for anyone else. Enabling
 // self-approval or changing a scope then takes a new review before the
@@ -245,6 +248,7 @@ module.exports = {
   selfApproverOf,
   scopeOf,
   isSelfApprover,
+  selfApprovalsConfigured,
   namedReviewer,
   withdrawBeforeVerdict,
   syncSelfApproval,

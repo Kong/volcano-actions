@@ -26,6 +26,9 @@ function addedLines(patch) {
 }
 
 const flagName = /^[\w.:/-]{1,100}$/u;
+// A repository-relative path as listFiles names it: no leading or doubled
+// slash, and no `.` or `..` segment.
+const canonical = (path) => path.split('/').every((part) => part && part !== '.' && part !== '..');
 const quotes = (text, flag) => ['"', "'", '`'].some((q) => text.includes(`${q}${flag}${q}`));
 
 // The repository's flag check as a RegExp, or null when it names none.
@@ -43,6 +46,7 @@ async function gateProblem(lineOf, files, check, gate) {
   if (typeof path !== 'string' || !Number.isInteger(line) || typeof flag !== 'string' || !flagName.test(flag)) {
     return 'The AI review cited a feature flag check without its file, line, and flag.';
   }
+  if (!canonical(path)) return `The AI review cited ${path}, which is not a path as the PR's files name it.`;
   const where = `${path}:${line}`;
   let text;
   try {
@@ -69,7 +73,9 @@ function headLines(github, context) {
       read.set(
         path,
         github.rest.repos.getContent({ ...context.repo, path, ref: sha }).then(({ data }) => {
-          if (Array.isArray(data) || data.encoding !== 'base64') throw new Error(`${path} is not a readable file`);
+          if (Array.isArray(data) || data.encoding !== 'base64' || data.path !== path) {
+            throw new Error(`${path} is not a readable file`);
+          }
           return Buffer.from(data.content, 'base64').toString('utf8').split('\n');
         }),
       );

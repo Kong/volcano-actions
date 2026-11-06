@@ -5,7 +5,7 @@
 // dismissals, and the needs-human-review label.
 
 const { overriddenBy, statusContext } = require('./constants.cjs');
-const { storedDecision } = require('./decision.cjs');
+const { storedDecision, storedMarker } = require('./decision.cjs');
 const {
   setStatus,
   removeOverrideLabel,
@@ -30,12 +30,19 @@ async function restoreHuman({ github, context, core }, pull, sha, reasons, store
   return setHumanStatus(github, context, pull, sha, [...new Set(reasons)], cutoff(stored), owners);
 }
 
-// Withdraws every approval the review gave on a PR whose human status could
-// not be set, or whose decision is missing, and fails the verdict when one
-// stays, so a stale approval cannot carry the PR.
-async function withdrawUnsettled({ github, context, core }, pull) {
+// Withdraws every approval the review gave on PR `number` when its human
+// status could not be set, or its decision is missing, and fails the verdict
+// when one stays, so a stale approval cannot carry the PR. A PR that cannot be
+// read loses every such approval, whatever head it was for.
+async function withdrawUnsettled({ github, context, core }, number) {
+  let pull;
+  try {
+    ({ data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: number }));
+  } catch {
+    pull = { number, head: { sha: null } };
+  }
   const sha = pull.head.sha;
-  if (await withdrawBeforeVerdict({ github, context, core }, pull, sha)) return;
+  if ((await withdrawBeforeVerdict({ github, context, core }, pull, sha)) || !sha) return;
   const status = await verdictStatus(github, context, sha);
   await setStatus(github, context, sha, 'failure', unwithdrawn, statusContext, status?.target_url);
 }
@@ -101,29 +108,48 @@ async function gatePulls(github, context) {
   return data.map((p) => p.number);
 }
 
+// The recorded decision as the summary holds it, which changes whenever
+// publish records a new one, even for the same head.
+const markerOf = (comment) => comment?.body.match(storedMarker)?.[1] ?? null;
+
+// Re-sets PR `number`'s human status and the review's approval from its
+// recorded decision. Returns the marker of the decision it acted on, or null
+// when it acted on none.
+async function regate({ github, context, core }, number) {
+  const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+  if (pull.state !== 'open') return null;
+  const comment = await summaryComment(github, context, number);
+  const stored = storedDecision(comment, pull.head.sha);
+  // Its review sets the status when it lands, reading the reviews then. No
+  // approval of the review's stands without a decision behind it.
+  if (!stored && !isFork(context, pull)) {
+    core.notice(`Leaving ${pull.head.sha.slice(0, 7)} of #${number} to its review, which has not finished.`);
+    await withdrawUnsettled({ github, context, core }, number);
+    return null;
+  }
+  const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
+  const status = await restoreHuman({ github, context, core }, pull, pull.head.sha, reasons, stored);
+  await syncSelfApproval({ github, context, core }, pull, pull.head.sha, status, stored?.scope);
+  await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
+  return markerOf(comment);
+}
+
 // Sets the live head's human status again after a review, a dismissal, or a
 // change to the needs-human-review label. Runs from the base branch: a review
 // event runs the PR's own copy of its workflow, so that run only triggers this.
+// A review can record a new decision for the same head while this runs, and
+// the status and approval set here would then follow the old one, so it runs
+// again on the new one. Any failure withdraws the review's approvals.
 async function gate({ github, context, core }) {
   for (const number of await gatePulls(github, context)) {
-    const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
-    if (pull.state !== 'open') continue;
-    const stored = storedDecision(await summaryComment(github, context, number), pull.head.sha);
-    // Its review sets the status when it lands, reading the reviews then. No
-    // approval of the review's stands without a decision behind it.
-    if (!stored && !isFork(context, pull)) {
-      core.notice(`Leaving ${pull.head.sha.slice(0, 7)} of #${number} to its review, which has not finished.`);
-      await withdrawUnsettled({ github, context, core }, pull);
-      continue;
-    }
     try {
-      const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
-      const status = await restoreHuman({ github, context, core }, pull, pull.head.sha, reasons, stored);
-      await syncSelfApproval({ github, context, core }, pull, pull.head.sha, status, stored?.scope);
-      await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
+      for (let pass = 0; pass < 3; pass++) {
+        const acted = await regate({ github, context, core }, number);
+        if (acted === null || markerOf(await summaryComment(github, context, number)) === acted) break;
+      }
     } catch (error) {
       core.setFailed(`Could not re-set the human review status of #${number}: ${error.message}`);
-      await withdrawUnsettled({ github, context, core }, pull);
+      await withdrawUnsettled({ github, context, core }, number);
     }
   }
 }
