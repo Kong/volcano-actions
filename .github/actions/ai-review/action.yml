@@ -27,10 +27,10 @@ inputs:
     description: For publish, 'true' to have a person review every PR a bot opens, whatever the reviewers decide.
     default: 'false'
   owners:
-    description: For publish, the owners of the repository's paths, one line each as a glob and logins, such as `apps/web/** @octocat @hubot`. When a PR needs a person, the human status counts only an approval from an owner of each owned path it changes. A file's owners are those of the last line matching it, globs match as in human-review-paths, and the PR author never counts as an owner.
+    description: For publish, gate, and override, the owners of the repository's paths in CODEOWNERS syntax, such as `/apps/web/ @octocat @hubot`. When a PR needs a person, the human status counts only an approval from an owner of each owned path it changes. A file's owners are those of the last line matching it, and the PR author never counts as an owner. Owners are user logins; team handles are skipped with a warning.
     default: ''
   self-approvers:
-    description: For prepare, publish, override, and gate, the authors whose PRs the review approves itself when nothing calls for a person, for repositories that keep required approvals. One per line, as `login` or `login, reviewed by login`, then optionally `:` and a change they may merge without a person, completing "a change that is ...". Before the colon, `, behind a feature flag` makes the scope hold only on flag checks publish verifies (see feature-flag-check). Each line adds a scope, and `*` lines add theirs for every author who is a person. The named reviewer is asked whenever their PR needs a person. Without it, the review only withdraws approvals it gave.
+    description: For prepare, publish, override, and gate, the authors whose PRs the review approves itself when nothing calls for a person, for repositories that keep required approvals. One per line, as `login` or `login, reviewed by login`, then optionally `:` and a change they may merge without a person, completing "a change that is ...". Before the colon, `, behind a feature flag` makes the scope hold only on flag checks publish verifies (see feature-flag-check). Each line adds a scope, and `*` lines add theirs for every author who is a person. The named reviewer, from the author's own line or else a `*` line, is asked whenever their PR needs a person, alongside the owners of any owned paths it changes, whose approval is the one that counts there (see owners). Without it, the review only withdraws approvals it gave.
     default: ''
 
 outputs:

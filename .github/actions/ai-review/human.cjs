@@ -94,12 +94,13 @@ async function setHumanStatus(github, context, pull, sha, reasons, since = null,
 // Asks for a review when the live head waits on a person and nobody has been
 // asked by name yet; a team request, such as one from CODEOWNERS, does not
 // count. It asks the approvers whose approval no longer counts, or else the
-// owners no approval has come from, or else, before the first human review,
-// the suggested reviewer. Requesting a reviewer is a
+// owners no approval has come from, with the suggested reviewer, or else,
+// before the first human review, the suggested reviewer alone. Requesting a reviewer is a
 // courtesy, so a failure only warns.
 async function requestReviewer(github, context, core, pull, sha, { waiting, stale = [], unowned = [] }, reviewer) {
   const owners = [...new Set(unowned.flatMap((g) => g.logins))].slice(0, 15);
-  const asked = stale.length > 0 ? stale : owners.length > 0 ? owners : [reviewer?.login].filter(Boolean);
+  const suggested = [reviewer?.login].filter(Boolean);
+  const asked = stale.length > 0 ? stale : [...new Set([...owners, ...suggested])];
   if (
     !waiting ||
     asked.length === 0 ||

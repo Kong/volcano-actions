@@ -67,7 +67,7 @@ on:
         type: string
         default: ''
       human_review_paths:
-        description: Newline-separated globs of paths whose changes always need a human review, whatever the reviewers decide. A glob followed by `except` and comma-separated logins does not reserve its paths in those authors' own PRs.
+        description: Newline-separated globs of paths whose changes always need a human review, whatever the reviewers decide.
         type: string
         default: ''
       # Dependabot's pull_request_target runs keep the requested write token.

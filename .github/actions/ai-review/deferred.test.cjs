@@ -215,11 +215,12 @@ test('the human status is set after the summary dates a deferral, and the verdic
   const order = c.calls
     .filter((call) => ['createComment', 'updateComment', 'createCommitStatus'].includes(call.call))
     .map((call) => (call.context ? `${call.context} ${call.state}` : call.call));
-  // The verdict passes last, once the human status applies the dated deferral.
+  // The summary records the decision before any verdict is set, and the
+  // verdict passes last, once the human status applies the dated deferral.
   assert.deepEqual(order, [
-    `${statusContext} failure`,
     'createComment',
     'updateComment',
+    `${statusContext} failure`,
     `${humanStatusContext} pending`,
     `${statusContext} success`,
   ]);

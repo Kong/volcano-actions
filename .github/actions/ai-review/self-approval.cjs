@@ -18,8 +18,9 @@ const { setStatus, verdictStatus, verdictState } = require('./github.cjs');
 //   change within one of their scopes.
 // - A scope behind a feature flag holds only when the review cites the flag
 //   checks that keep the change off, and publish verifies them (see
-//   flag-gates.cjs). Such a line needs a scope, or it names nobody.
-// - The reviewer, when named, is the one asked whenever the author's PR
+//   flag-gates.cjs). Such a line needs a scope, on it or on the lines
+//   continuing it, or it names nobody.
+// - The reviewer, when named on the author's own line or else on a `*` line, is the one asked whenever the author's PR
 //   needs a person, in place of the one the review suggests.
 // - A line that does not parse names nobody, so a typo can only withhold an
 //   approval.
@@ -58,7 +59,7 @@ function selfApprovers() {
     }
     const match = entryPattern.exec(line.trim());
     const text = (match?.groups.scope ?? '').trim();
-    if (!match || (match.groups.flagged && !text)) {
+    if (!match) {
       last = null;
       continue;
     }
@@ -67,6 +68,11 @@ function selfApprovers() {
     last.scopes.push({ text, flagged: Boolean(match.groups.flagged) });
     last.reviewer ??= match.groups.reviewer ?? null;
     entries.set(login, last);
+  }
+  // A scope behind a flag needs its text, which continuation lines may give.
+  for (const [login, entry] of entries) {
+    entry.scopes = entry.scopes.filter((s) => !s.flagged || s.text);
+    if (entry.scopes.length === 0) entries.delete(login);
   }
   return entries;
 }
@@ -83,7 +89,7 @@ function selfApproverOf(user) {
   const anyone = user.type === 'User' ? entries.get('*') : undefined;
   if (!own && !anyone) return null;
   const all = [...(own?.scopes ?? []), ...(anyone?.scopes ?? [])];
-  const reviewer = own?.reviewer ?? null;
+  const reviewer = own?.reviewer ?? anyone?.reviewer ?? null;
   if (all.some((s) => s.text === '')) return { scopes: [], flagged: [], reviewer };
   const scopes = [...new Set(all.map((s) => s.text))];
   const flagged = scopes.filter((text) => all.some((s) => s.text === text && s.flagged));

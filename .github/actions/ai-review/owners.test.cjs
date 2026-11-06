@@ -109,3 +109,45 @@ test('later events hold approvals to the owners the summary recorded', async () 
   assert.equal(await statusAfter('reviewer'), 'pending');
   assert.equal(await statusAfter('octocat'), 'success');
 });
+
+test('owners read CODEOWNERS paths, and a team handle is skipped with a warning', async (t) => {
+  useOwners(t, ['/web/ @octocat', '*billing* @monalisa @Kong/billing'].join('\n'));
+  const k = core();
+  claudeReviews(t, 'success', output([], 'Edits pricing.', needed));
+  const c = client({
+    files: [{ filename: 'web/pricing.tsx' }, { filename: 'api/billing-format.ts' }],
+    reviews: [review('hubot', 'APPROVED')],
+  });
+  await publish({ github: c.github, context: context(), core: k });
+  assert.deepEqual(c.set(humanStatusContext)[0].slice(1), [
+    'pending',
+    'Needs an approval from an owner of web/pricing.tsx: octocat.',
+  ]);
+  assert.match(k.warnings.join('\n'), /names @Kong\/billing, which is not a user login, so it is skipped/u);
+  assert.match(c.named('createComment')[0].body, /one of `monalisa` \(owns `api\/billing-format\.ts`\)/u);
+});
+
+test('a fork PR, which is never reviewed, still needs its owners', async (t) => {
+  useOwners(t);
+  const statusAfter = async (approver) => {
+    const c = client({ headRepo: 'someone/volcano-hosting', files, reviews: [review(approver, 'APPROVED')] });
+    await gate({ github: c.github, context: context({ action: 'labeled' }), core: core() });
+    return c.set(humanStatusContext)[0].slice(1);
+  };
+  assert.deepEqual(await statusAfter('reviewer'), [
+    'pending',
+    'Needs an approval from an owner of web/pricing.tsx: octocat, hubot.',
+  ]);
+  assert.deepEqual(await statusAfter('hubot'), [
+    'pending',
+    'Needs an approval from an owner of web/billing/plan.ts: monalisa.',
+  ]);
+});
+
+test("the owners are asked along with the author's named reviewer", async (t) => {
+  useOwners(t);
+  process.env.SELF_APPROVERS = 'author, reviewed by mona: copy';
+  clearAfter(t, 'SELF_APPROVERS');
+  const { asked } = await publishOwned(t, needed);
+  assert.deepEqual(asked, [['octocat', 'hubot', 'monalisa', 'mona']]);
+});
