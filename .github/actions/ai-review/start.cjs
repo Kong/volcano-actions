@@ -2,6 +2,7 @@
 
 const { humanStatusContext } = require('./constants.cjs');
 const { setStatus, verdictState, canWrite, livePull } = require('./github.cjs');
+const { skipForLavaFlow } = require('./lavaflow.cjs');
 
 // Statuses of a run that has not finished, including one waiting on a
 // concurrency group or an approval.
@@ -105,8 +106,9 @@ async function abandoned(github, context, pull, sha) {
 }
 
 // Marks the live head as under review, so the gate is pending rather than
-// absent and an override cannot pass it before the verdict lands, then cancels
-// the reviews of heads the PR has moved past.
+// absent and an override cannot pass it before the verdict lands, or passes a
+// head LavaFlow reviewed, then cancels the reviews of heads the PR has moved
+// past.
 async function start({ github, context, core }) {
   const sha = context.payload.pull_request.head.sha;
   const skip = (reason) => {
@@ -136,9 +138,13 @@ async function start({ github, context, core }) {
   if (!context.actor.endsWith('[bot]') && !(await canWrite(github, context, context.actor))) {
     return skip(`${context.actor} lacks write access.`);
   }
-  await setStatus(github, context, sha, 'pending', 'The AI review is running.');
-  await setStatus(github, context, sha, 'pending', 'Waiting for the AI review.', humanStatusContext);
-  core.setOutput('review', 'true');
+  if (await skipForLavaFlow({ github, context, core }, pull, sha)) {
+    core.setOutput('review', 'false');
+  } else {
+    await setStatus(github, context, sha, 'pending', 'The AI review is running.');
+    await setStatus(github, context, sha, 'pending', 'Waiting for the AI review.', humanStatusContext);
+    core.setOutput('review', 'true');
+  }
   try {
     await cancelSuperseded({ github, context, core }, pull);
   } catch (error) {
