@@ -2,6 +2,7 @@
 
 const { statusContext, humanStatusContext, incomplete, approvedPrefix, fit } = require('./constants.cjs');
 const { setStatus, verdictStatus, canWrite } = require('./github.cjs');
+const { owed } = require('./owners.cjs');
 
 const isOtherUser = (r, pull) => r.user?.type === 'User' && r.user.login !== pull.user?.login;
 
@@ -50,8 +51,12 @@ async function settleIncompleteReview(github, context, sha, approvers) {
   }
 }
 
-function humanState({ approvers, blockers }, reasons) {
+function humanState({ approvers, blockers }, reasons, unowned) {
   if (blockers.length > 0) return ['pending', `Changes requested by ${blockers.join(', ')}.`];
+  if (approvers.length > 0 && unowned.length > 0) {
+    const [{ path, logins }] = unowned;
+    return ['pending', `Needs an approval from an owner of ${path}: ${logins.join(', ')}.`];
+  }
   if (approvers.length > 0) return ['success', `Approved by ${approvers.map((a) => a.login).join(', ')}.`];
   if (reasons.length > 0) return ['pending', `Needs human review: ${reasons[0]}`];
   return ['success', 'No human review needed.'];
@@ -64,26 +69,37 @@ function humanState({ approvers, blockers }, reasons) {
 // Those approvers are `stale`, to be asked again. `clear` says nothing calls
 // for a person and nobody requested changes, which a self-approval needs (see
 // self-approval.cjs); `reviews` lists every review, to find the AI review's own.
-async function setHumanStatus(github, context, pull, sha, reasons, since = null) {
+// With `owners` (see owners.cjs), a head that needs a person needs an approval
+// from each group; `unowned` lists the groups none has come from yet.
+async function setHumanStatus(github, context, pull, sha, reasons, since = null, owners = []) {
   const reviews = await standing(github, context, pull);
   const after = (a) => a.commit === sha && Date.parse(a.at) > Date.parse(since);
   const counted = since ? { ...reviews, approvers: reviews.approvers.filter((a) => after(a)) } : reviews;
   const stale = reviews.approvers.filter((a) => !counted.approvers.includes(a)).map((a) => a.login);
-  const [state, description] = humanState(counted, reasons);
+  const unowned = reasons.length > 0 ? owed(owners, counted.approvers) : [];
+  const [state, description] = humanState(counted, reasons, unowned);
   await setStatus(github, context, sha, state, fit(description), humanStatusContext);
   await settleIncompleteReview(github, context, sha, reviews.approvers);
   const open = state === 'pending' && reviews.blockers.length === 0;
   const clear = reasons.length === 0 && reviews.blockers.length === 0;
-  return { waiting: open && (!reviews.reviewed || stale.length > 0), stale, clear, reviews: reviews.reviews };
+  return {
+    waiting: open && (!reviews.reviewed || stale.length > 0 || unowned.length > 0),
+    stale,
+    unowned,
+    clear,
+    reviews: reviews.reviews,
+  };
 }
 
 // Asks for a review when the live head waits on a person and nobody has been
 // asked by name yet; a team request, such as one from CODEOWNERS, does not
-// count. It asks the approvers whose approval no longer counts, or else, before
-// the first human review, the suggested reviewer. Requesting a reviewer is a
+// count. It asks the approvers whose approval no longer counts, or else the
+// owners no approval has come from, or else, before the first human review,
+// the suggested reviewer. Requesting a reviewer is a
 // courtesy, so a failure only warns.
-async function requestReviewer(github, context, core, pull, sha, { waiting, stale = [] }, reviewer) {
-  const asked = stale.length > 0 ? stale : [reviewer?.login].filter(Boolean);
+async function requestReviewer(github, context, core, pull, sha, { waiting, stale = [], unowned = [] }, reviewer) {
+  const owners = [...new Set(unowned.flatMap((g) => g.logins))].slice(0, 15);
+  const asked = stale.length > 0 ? stale : owners.length > 0 ? owners : [reviewer?.login].filter(Boolean);
   if (
     !waiting ||
     asked.length === 0 ||
