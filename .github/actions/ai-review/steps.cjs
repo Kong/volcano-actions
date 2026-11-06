@@ -22,6 +22,7 @@ const { reviewerCandidates } = require('./candidates.cjs');
 const { reviewersOf } = require('./reviews.cjs');
 const { postFindings } = require('./findings.cjs');
 const { start } = require('./start.cjs');
+const { headApprovalsOnly } = require('./lavaflow.cjs');
 const { keptSince, cutoff } = require('./deferral.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
@@ -242,14 +243,16 @@ async function gate({ github, context, core }) {
     const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
     if (pull.state !== 'open') continue;
     const stored = storedDecision(await summaryComment(github, context, number), pull.head.sha);
+    const skipped = isLavaFlowSkip(await verdictStatus(github, context, pull.head.sha));
     // Its review sets the status when it lands, reading the reviews then. A
     // fork, or a head passed on LavaFlow's review, has no review to wait for.
-    if (!stored && !isFork(context, pull) && !isLavaFlowSkip(await verdictStatus(github, context, pull.head.sha))) {
+    if (!stored && !isFork(context, pull) && !skipped) {
       core.notice(`Leaving ${pull.head.sha.slice(0, 7)} of #${number} to its review, which has not finished.`);
       continue;
     }
     const reasons = [...(stored?.reasons ?? []), ...(await liveReasons(github, context, pull, pull.head.sha))];
-    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], cutoff(stored));
+    const since = cutoff(stored) ?? (skipped ? headApprovalsOnly : null);
+    const status = await setHumanStatus(github, context, pull, pull.head.sha, [...new Set(reasons)], since);
     await requestReviewer(github, context, core, pull, pull.head.sha, status, stored?.reviewer);
   }
 }

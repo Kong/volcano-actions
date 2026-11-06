@@ -107,7 +107,8 @@ approval carries across later pushes, except past a P2 the author deferred:
 then only an approval of that commit given after GitHub recorded the summary
 that reported the deferral counts. A re-run of the commit keeps that time
 unless it defers a problem the last review did not, naming each finding in it
-by title and line. Changes requested by a collaborator with write access hold
+by title and line. On a head passed on LavaFlow's review, only an approval of
+that commit counts. Changes requested by a collaborator with write access hold
 it until they approve or their review is dismissed.
 The summary comment lists each reason as a question for the person to decide,
 and what the reviews could not check, such as behavior only running the code
@@ -143,27 +144,30 @@ CODEOWNERS line.
 ### PRs LavaFlow reviewed
 
 LavaFlow opens fix PRs from one of Volcano's GitHub Apps, and reviews each head
-it pushes in a comment review from the same App. The AI review skips a head
-LavaFlow reviewed, only when all of these hold:
+it pushes in a comment review from the same App. The review action's
+`lavaflow-apps` input lists those Apps; Volcano's are `volcano-github-app[bot]`
+and `volcano-staging[bot]`. When the workflow passes the list, the AI review
+skips a head LavaFlow reviewed, only when all of these hold:
 
-- The PR's author is a bot whose login is exactly one of LavaFlow's Apps:
-  `volcano-github-app[bot]` or `volcano-staging[bot]`. A login that only
-  resembles one, or an account of another type, does not count.
+- The PR's author is a bot whose login is exactly one in the list. A login
+  that only resembles one, or an account of another type, does not count.
 - The same App posted a comment review of the PR's current head. GitHub names
   `web-flow` as the committer of an App's commits, so only the review's commit
   ties it to the head. Any other head is reviewed as usual, including a
   person's commit on the branch and an App commit LavaFlow has not reviewed
   yet.
-- The AI review has not reached a verdict for that head. A re-run or a later
+- The PR's base has never changed. A retarget changes what the PR merges.
+- The AI review has never reached a verdict for that head. A re-run or a later
   event reviews it again rather than replace that verdict.
 
 The skip passes `ai-review/verdict` as "Skipped: LavaFlow reviewed `<sha>`
 (review `<id>`).", linked to that review. It never stands in for a person:
 `ai-review/human` waits with "LavaFlow reviewed `<sha>` in place of the AI
-review." as its reason, and passes only by the rules above, once a
-collaborator with write access other than the author approves. The skip posts
-no summary comment and requests nobody by name. When reading the PR's reviews
-or statuses fails, the head is reviewed as usual.
+review." as its reason, and passes only once a collaborator with write access
+other than the author approves that commit. An approval of an earlier commit
+does not carry over, and the human gate asks that approver again. The skip
+posts no summary comment. When reading the PR's reviews, events, or statuses
+fails, the head is reviewed as usual.
 
 A run that starts before LavaFlow's review of its head exists reviews the
 head as usual, and its verdict stands.

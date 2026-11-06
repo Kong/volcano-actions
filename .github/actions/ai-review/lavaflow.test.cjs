@@ -18,14 +18,36 @@ const posted = (user = staging, commit = sha, id = 41) => ({
   html_url: `https://github.com/Kong/volcano-hosting/pull/7#pullrequestreview-${id}`,
 });
 const verdict = (state, description = 'x') => ({ context: statusContext, state, description });
+// An approval of `commit`, dated as GitHub dates a submitted review.
+const approval = (login, commit = sha, type = 'User') => ({
+  ...review(login, 'APPROVED', type, commit),
+  submitted_at: '2026-11-06T12:00:00Z',
+});
 
-// A client whose live PR was opened by `author`.
+// A client whose live PR was opened by `author`, with the PR's issue
+// `events` and the head's status `history`, newest first, which defaults to
+// its latest statuses.
 function openedBy(author, options = {}) {
   const c = client(options);
   const { get } = c.github.rest.pulls;
   c.github.rest.pulls.get = async (args) => {
     const { data } = await get(args);
     return { data: { ...data, user: author } };
+  };
+  const { events = [], history = options.statuses ?? [], failEvents = false, failStatuses = false } = options;
+  const { issues, repos } = c.github.rest;
+  issues.listEvents = () => {};
+  repos.listCommitStatusesForRef = () => {};
+  const lists = new Map([
+    [issues.listEvents, ['listEvents', events, failEvents]],
+    [repos.listCommitStatusesForRef, ['listCommitStatusesForRef', history, failStatuses]],
+  ]);
+  const { paginate } = c.github;
+  c.github.paginate = (method, args) => {
+    if (!lists.has(method)) return paginate(method, args);
+    const [call, items, fail] = lists.get(method);
+    c.calls.push({ ...args, call });
+    return fail ? Promise.reject(Object.assign(new Error('Server Error'), { status: 500 })) : Promise.resolve(items);
   };
   return c;
 }
@@ -84,6 +106,14 @@ test("an App's PR skips the review at a head the same App reviewed, and waits fo
         [7, 100],
       ],
     );
+    assert.deepEqual(
+      c.named('listEvents').map((l) => [l.issue_number, l.per_page]),
+      [[7, 100]],
+    );
+    assert.deepEqual(
+      c.named('listCommitStatusesForRef').map((l) => [l.ref, l.per_page]),
+      [[sha, 100]],
+    );
     assert.ok(
       k.notices.includes(`Skipping the review of abcdef1: ${user.login} opened the PR and reviewed it (review 41).`),
     );
@@ -98,11 +128,14 @@ test('only an approval by a person with write access passes the human status of 
   const waiting = [['pending', 'Needs human review: LavaFlow reviewed abcdef1 in place of the AI review.']];
   // The App's own review, the author, and other bots are not a person's approval.
   assert.deepEqual(await state([]), waiting);
-  assert.deepEqual(await state([review('volcano-staging[bot]', 'APPROVED', 'Bot')]), waiting);
-  assert.deepEqual(await state([review('copilot', 'APPROVED', 'Bot')]), waiting);
+  assert.deepEqual(await state([approval('volcano-staging[bot]', sha, 'Bot')]), waiting);
+  assert.deepEqual(await state([approval('copilot', sha, 'Bot')]), waiting);
   assert.deepEqual(await state([review('reviewer', 'COMMENTED')]), waiting);
-  assert.deepEqual(await state([review('reviewer', 'APPROVED')]), [['success', 'Approved by reviewer.']]);
-  assert.deepEqual(await state([review('reviewer', 'APPROVED'), review('other', 'CHANGES_REQUESTED')]), [
+  assert.deepEqual(await state([approval('reviewer')]), [['success', 'Approved by reviewer.']]);
+  // Nobody read this commit, so an approval of an earlier one does not count.
+  assert.deepEqual(await state([approval('reviewer', older)]), waiting);
+  assert.deepEqual(await state([approval('reviewer', older), approval('other')]), [['success', 'Approved by other.']]);
+  assert.deepEqual(await state([approval('reviewer'), review('other', 'CHANGES_REQUESTED')]), [
     ['pending', 'Changes requested by other.'],
   ]);
   // The label still asks for a person too.
@@ -161,10 +194,36 @@ test("LavaFlow's review never replaces the AI review's verdict for its head", as
     const { k } = await startFor(t, staging, { reviews: [posted()], statuses: [status] });
     assert.deepEqual(k.outputs, { review: 'false' }, status.description);
   }
+  // A re-run marks the head pending before its own verdict lands.
+  const history = [verdict('pending'), verdict('failure')];
+  const { c, k } = await startFor(t, staging, { reviews: [posted()], statuses: [history[0]], history });
+  ranAsUsual(c, k, 'pending over a failure');
+  assert.ok(
+    k.notices.includes('LavaFlow reviewed abcdef1, but the AI review has a verdict for it, so the AI review runs.'),
+  );
 });
 
-test("an error reading the PR's reviews or statuses runs the review as usual", async (t) => {
-  for (const options of [{ failReviews: true }, { failStatuses: true }]) {
+// LavaFlow reviewed the change against the base it opened the PR on.
+test('a PR whose base changed runs the review as usual', async (t) => {
+  const { c, k } = await startFor(t, staging, {
+    reviews: [posted()],
+    events: [{ event: 'labeled' }, { event: 'base_ref_changed' }],
+  });
+  ranAsUsual(c, k, 'retargeted');
+  assert.ok(
+    k.notices.includes(
+      'LavaFlow reviewed abcdef1, but the PR has changed base since it was opened, so the AI review runs.',
+    ),
+  );
+  const other = await startFor(t, staging, {
+    reviews: [posted()],
+    events: [{ event: 'labeled' }, { event: 'review_requested' }, { event: 'head_ref_force_pushed' }],
+  });
+  assert.deepEqual(other.k.outputs, { review: 'false' });
+});
+
+test("an error reading the PR's reviews, events, or statuses runs the review as usual", async (t) => {
+  for (const options of [{ failReviews: true }, { failEvents: true }, { failStatuses: true }]) {
     const { c, k } = await startFor(t, staging, { reviews: [posted()], ...options });
     ranAsUsual(c, k, JSON.stringify(options));
     assert.ok(
@@ -197,8 +256,18 @@ test("the human gate re-sets a head passed on LavaFlow's review", async () => {
   assert.deepEqual(await run([posted()]), [
     ['pending', 'Needs human review: LavaFlow reviewed abcdef1 in place of the AI review.'],
   ]);
-  assert.deepEqual(await run([posted(), review('reviewer', 'APPROVED')]), [['success', 'Approved by reviewer.']]);
+  assert.deepEqual(await run([posted(), approval('reviewer')]), [['success', 'Approved by reviewer.']]);
+  // An approval of an earlier head does not count, and its approver is asked again.
+  const c = client({ reviews: [posted(), approval('reviewer', older)], statuses: [skipped] });
+  await gate({ github: c.github, context: context({ action: 'labeled' }), core: core() });
+  assert.deepEqual(c.set(humanStatusContext), [
+    [sha, 'pending', 'Needs human review: LavaFlow reviewed abcdef1 in place of the AI review.'],
+  ]);
+  assert.deepEqual(
+    c.named('requestReviewers').map((r) => r.reviewers),
+    [['reviewer']],
+  );
   // A head under review still waits for it.
-  assert.deepEqual(await run([review('reviewer', 'APPROVED')], [verdict('pending')]), []);
-  assert.deepEqual(await run([review('reviewer', 'APPROVED')], [verdict('failure', skipped.description)]), []);
+  assert.deepEqual(await run([approval('reviewer')], [verdict('pending')]), []);
+  assert.deepEqual(await run([approval('reviewer')], [verdict('failure', skipped.description)]), []);
 });
