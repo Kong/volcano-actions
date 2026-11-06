@@ -7,7 +7,8 @@ const { setStatus, verdictStatus, verdictState } = require('./github.cjs');
 // merge on the AI review's decision: for their PRs, the review approves the
 // head itself when nothing calls for a person, and withdraws the approval
 // once something does. The caller lists those authors in SELF_APPROVERS, one
-// per line, as `login: scope` or `login, reviewed by login: scope`:
+// per line, as `login: scope` or `login, reviewed by login: scope`, either
+// optionally followed by `, behind a feature flag` before the colon:
 //
 // - The scope completes "a change that is ..." and narrows what the author
 //   may merge without a person (see prepare.cjs). Without one, the review's
@@ -15,6 +16,9 @@ const { setStatus, verdictStatus, verdictState } = require('./github.cjs');
 // - Each line for a login adds a scope, and `*` lines add theirs for every
 //   author who is a person, not a bot. An author's PR may then merge any
 //   change within one of their scopes.
+// - A scope behind a feature flag holds only when the review cites the flag
+//   checks that keep the change off, and publish verifies them (see
+//   flag-gates.cjs). Such a line needs a scope, or it names nobody.
 // - The reviewer, when named, is the one asked whenever the author's PR
 //   needs a person, in place of the one the review suggests.
 // - A line that does not parse names nobody, so a typo can only withhold an
@@ -37,27 +41,30 @@ const { setStatus, verdictStatus, verdictState } = require('./github.cjs');
 const bot = 'github-actions[bot]';
 const selfApprovalMarker = '<!-- ai-review-self-approval -->';
 const entryPattern =
-  /^(?<login>\*|[A-Za-z0-9-]+)(?:\s*,\s*reviewed by\s+(?<reviewer>[A-Za-z0-9-]+))?\s*(?::\s*(?<scope>.*))?$/u;
+  /^(?<login>\*|[A-Za-z0-9-]+)(?:\s*,\s*reviewed by\s+(?<reviewer>[A-Za-z0-9-]+))?(?:\s*,\s*(?<flagged>behind a feature flag))?\s*(?::\s*(?<scope>.*))?$/u;
+const flagMark = '(behind a feature flag)';
 
-// Each entry by lowercase login, or `*`, with the scopes its lines give and
-// the first reviewer they name.
+// Each entry by lowercase login, or `*`, with the scopes its lines give, as
+// { text, flagged }, and the first reviewer they name.
 function selfApprovers() {
   const entries = new Map();
   let last = null;
   for (const line of (process.env.SELF_APPROVERS || '').split('\n')) {
     if (!line.trim()) continue;
     if (/^\s/u.test(line)) {
-      if (last) last.scopes.push(`${last.scopes.pop()} ${line.trim()}`.trim());
+      const scope = last?.scopes.at(-1);
+      if (scope) scope.text = `${scope.text} ${line.trim()}`.trim();
       continue;
     }
     const match = entryPattern.exec(line.trim());
-    if (!match) {
+    const text = (match?.groups.scope ?? '').trim();
+    if (!match || (match.groups.flagged && !text)) {
       last = null;
       continue;
     }
     const login = match.groups.login.toLowerCase();
     last = entries.get(login) ?? { scopes: [], reviewer: null };
-    last.scopes.push((match.groups.scope ?? '').trim());
+    last.scopes.push({ text, flagged: Boolean(match.groups.flagged) });
     last.reviewer ??= match.groups.reviewer ?? null;
     entries.set(login, last);
   }
@@ -67,15 +74,20 @@ function selfApprovers() {
 // What the PR author `user` may merge on the review's decision: the scopes of
 // their own lines and, for a person, the `*` lines, with their reviewer, or
 // null when no line covers them. An empty scope among them leaves the
-// review's usual decision, so `scopes` is then empty.
+// review's usual decision, so `scopes` is then empty. `flagged` lists the
+// scopes that hold only behind a feature flag.
 function selfApproverOf(user) {
   if (typeof user?.login !== 'string') return null;
   const entries = selfApprovers();
   const own = entries.get(user.login.toLowerCase());
   const anyone = user.type === 'User' ? entries.get('*') : undefined;
   if (!own && !anyone) return null;
-  const scopes = [...(own?.scopes ?? []), ...(anyone?.scopes ?? [])];
-  return { scopes: scopes.includes('') ? [] : [...new Set(scopes)], reviewer: own?.reviewer ?? null };
+  const all = [...(own?.scopes ?? []), ...(anyone?.scopes ?? [])];
+  const reviewer = own?.reviewer ?? null;
+  if (all.some((s) => s.text === '')) return { scopes: [], flagged: [], reviewer };
+  const scopes = [...new Set(all.map((s) => s.text))];
+  const flagged = scopes.filter((text) => all.some((s) => s.text === text && s.flagged));
+  return { scopes, flagged, reviewer };
 }
 
 const isSelfApprover = (user) => selfApproverOf(user) !== null;
@@ -84,7 +96,10 @@ const isSelfApprover = (user) => selfApproverOf(user) !== null;
 // a self-approver's, possibly none, or null for anyone else. Enabling
 // self-approval or changing a scope then takes a new review before the
 // review approves an open PR.
-const scopeOf = (user) => selfApproverOf(user)?.scopes.join('\n') ?? null;
+function scopeOf(user) {
+  const own = selfApproverOf(user);
+  return own?.scopes.map((s) => (own.flagged.includes(s) ? `${s} ${flagMark}` : s)).join('\n') ?? null;
+}
 
 // The reviewer the caller names for the author's PRs, in the shape of the one
 // the review suggests, or null.
@@ -219,6 +234,7 @@ async function syncSelfApproval({ github, context, core }, pull, sha, { clear, r
 
 module.exports = {
   selfApprovalMarker,
+  flagMark,
   unwithdrawn,
   selfApproverOf,
   scopeOf,

@@ -4,19 +4,41 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { candidates } = require('./candidates.cjs');
 const { conversation } = require('./conversation.cjs');
-const { selfApproverOf } = require('./self-approval.cjs');
+const { selfApproverOf, flagMark } = require('./self-approval.cjs');
 
 // What a self-approver may merge on the review's decision (see
-// self-approval.cjs), as the policy puts it, or nothing for anyone else.
+// self-approval.cjs), as the policy puts it, or nothing for anyone else. A
+// scope behind a feature flag numbers the list, for the review to say which
+// one it clears and cite the flag checks.
 function selfApproval(author) {
-  const scopes = (selfApproverOf(author)?.scopes ?? []).map((s) => s.replace(/\.$/u, ''));
+  const own = selfApproverOf(author);
+  const bare = (s) => s.replace(/\.$/u, '');
+  const scopes = (own?.scopes ?? []).map((s) => bare(s));
   if (scopes.length === 0) return '';
+  const anythingElse = [
+    'Anything else needs a person, even a simple, low-risk change the cases',
+    'above would clear; give as the reason what the change does beyond that.',
+  ];
+  if (own.flagged.length > 0) {
+    return [
+      'The PR author may merge without a person only a change that is one of:',
+      ...own.scopes.map((s, i) => `${i + 1}. ${bare(s)}${own.flagged.includes(s) ? ` ${flagMark}` : ''}`),
+      ...anythingElse,
+      'Set human_review.within to the number of the case the change is, or 0',
+      'when it needs a person. For a case behind a feature flag, list in',
+      'human_review.flag_gates each flag check that keeps the changed code from',
+      'running or rendering while its flag is off: its file, its line in the',
+      "head revision, and the flag's name as the code spells it. Cite only checks",
+      'the base revision already has. A change that adds or changes the check it',
+      'relies on, or code that also runs while the flag is off, needs a person.',
+      'Otherwise leave flag_gates empty.',
+    ].join('\n');
+  }
   return [
     ...(scopes.length === 1
       ? [`The PR author may merge without a person only a change that is ${scopes[0]}.`]
       : ['The PR author may merge without a person only a change that is one of:', ...scopes.map((s) => `- ${s}`)]),
-    'Anything else needs a person, even a simple, low-risk change the cases',
-    'above would clear; give as the reason what the change does beyond that.',
+    ...anythingElse,
   ].join('\n');
 }
 
@@ -55,11 +77,42 @@ const withoutMaxLength = (node) => {
   );
 };
 
+// What a review clearing a change behind a feature flag reports, so publish
+// can verify it (see flag-gates.cjs).
+const flagFields = {
+  within: {
+    type: 'integer',
+    minimum: 0,
+    description: 'The number of the case the PR author may merge without a person that the change is, or 0.',
+  },
+  flag_gates: {
+    type: 'array',
+    maxItems: 20,
+    description: 'For a case behind a feature flag, each flag check that keeps the changed code off; otherwise empty.',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['path', 'line', 'flag'],
+      properties: {
+        path: { type: 'string', maxLength: 300, description: 'Repository-relative path of the check.' },
+        line: { type: 'integer', minimum: 1, description: 'The line of the check in the head revision.' },
+        flag: { type: 'string', maxLength: 100, description: 'The name of the flag as the code spells it.' },
+      },
+    },
+  },
+};
+
 // The review output schema on one line, as a CLI argument takes it, and a copy
 // without maxLength for providers whose structured outputs reject it, such as
-// OpenAI's. publish caps the lengths either way.
-function schemas() {
+// OpenAI's. publish caps the lengths either way. A self-approver with a scope
+// behind a feature flag, `author`, also reports the flag checks.
+function schemas(author = null) {
   const schema = JSON.parse(fs.readFileSync(path.join(__dirname, 'schema.json'), 'utf8'));
+  if (selfApproverOf(author)?.flagged.length > 0) {
+    const human = schema.properties.human_review;
+    Object.assign(human.properties, flagFields);
+    human.required.push(...Object.keys(flagFields));
+  }
   return { schema: JSON.stringify(schema), withoutMaxLength: JSON.stringify(withoutMaxLength(schema)) };
 }
 
@@ -71,7 +124,7 @@ async function prepare({ github, context, core }) {
   const dir = process.env.INPUTS;
   const logins = await candidates({ github, context, core }, dir);
   await conversation({ github, context }, dir);
-  const { schema, withoutMaxLength: bare } = schemas();
+  const { schema, withoutMaxLength: bare } = schemas(context.payload.pull_request.user);
   core.setOutput('inputs', dir);
   core.setOutput('candidates', JSON.stringify(logins));
   core.setOutput('policy', policy(context, dir, process.env.FOCUS || ''));

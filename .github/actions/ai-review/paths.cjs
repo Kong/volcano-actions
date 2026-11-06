@@ -22,15 +22,31 @@ function globRegExp(glob) {
   return new RegExp(`^${pattern}$`, 'u');
 }
 
+// The globs a repository reserves for a person, one per line, each optionally
+// followed by `except` and the logins, comma-separated, whose own PRs it does
+// not reserve, such as the owner of a directory.
+function reservedPaths() {
+  return (process.env.HUMAN_REVIEW_PATHS || '')
+    .split('\n')
+    .map((p) => p.trim())
+    .filter((p) => p && !p.startsWith('#'))
+    .map((line) => {
+      const [glob, ...rest] = line.split(/\s+except\s+/u);
+      const except = rest
+        .join(',')
+        .split(',')
+        .map((l) => l.trim().toLowerCase())
+        .filter(Boolean);
+      return { glob: glob.trim(), except };
+    });
+}
+
 // Reasons from the paths a repository reserves for a person, which no PR text
 // can argue away. Every other change is the reviewers' call. A rename counts
 // at both its old and new path. GitHub lists at most 3000 files, so a larger
-// PR cannot be checked in full.
-async function pathReasons(github, context, number) {
-  const own = (process.env.HUMAN_REVIEW_PATHS || '')
-    .split('\n')
-    .map((p) => p.trim())
-    .filter((p) => p && !p.startsWith('#'));
+// PR cannot be checked in full. `author` is the PR author's login.
+async function pathReasons(github, context, number, author = '') {
+  const own = reservedPaths().filter((p) => !p.except.includes(author.toLowerCase()));
   if (own.length === 0) return [];
   let files;
   try {
@@ -40,7 +56,7 @@ async function pathReasons(github, context, number) {
   }
   if (files.length >= 3000) return ['Changes more files than GitHub lists, so not every path could be checked.'];
   const changed = [...new Set(files.flatMap((f) => [f.filename, f.previous_filename]).filter(Boolean))];
-  const reserved = changed.filter((file) => own.some((p) => globRegExp(p).test(file)));
+  const reserved = changed.filter((file) => own.some((p) => globRegExp(p.glob).test(file)));
   if (reserved.length === 0) return [];
   const more = reserved.length > 1 ? ` (+${reserved.length - 1} more)` : '';
   return [`Changes a path this repository reserves for human review: ${reserved[0]}${more}.`];

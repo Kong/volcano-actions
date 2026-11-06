@@ -18,10 +18,13 @@ inputs:
     description: For publish, the directory holding each reviewer job's structured output as `ai-review-<job ID>.json`, which the job uploads as the artifact `ai-review-<job ID>`. Download the artifacts with `merge-multiple` set, which puts every file directly in the directory. An output can outgrow the 128 KiB an environment variable holds, so it never travels as a job output. A job that succeeded without a readable file did not complete its review.
     default: ''
   human-review-paths:
-    description: For publish, newline-separated globs of paths whose changes need a human review.
+    description: For publish, newline-separated globs of paths whose changes need a human review. A glob followed by `except` and comma-separated logins does not reserve its paths in those authors' own PRs.
+    default: ''
+  feature-flag-check:
+    description: For publish, a JavaScript regular expression that a line checking a feature flag matches, such as `useFeatureFlags|requireFeature`. A self-approver's scope behind a feature flag holds only when each check the review cites matches it, names the flag in quotes, and is a line the PR did not add or change. Without it, no such scope holds.
     default: ''
   self-approvers:
-    description: For prepare, publish, override, and gate, the authors whose PRs the review approves itself when nothing calls for a person, for repositories that keep required approvals. One per line, as `login` or `login, reviewed by login`, then optionally `:` and a change they may merge without a person, completing "a change that is ...". Each line adds a scope, and `*` lines add theirs for every author who is a person. The named reviewer is asked whenever their PR needs a person. Without it, the review only withdraws approvals it gave.
+    description: For prepare, publish, override, and gate, the authors whose PRs the review approves itself when nothing calls for a person, for repositories that keep required approvals. One per line, as `login` or `login, reviewed by login`, then optionally `:` and a change they may merge without a person, completing "a change that is ...". Before the colon, `, behind a feature flag` makes the scope hold only on flag checks publish verifies (see feature-flag-check). Each line adds a scope, and `*` lines add theirs for every author who is a person. The named reviewer is asked whenever their PR needs a person. Without it, the review only withdraws approvals it gave.
     default: ''
 
 outputs:
@@ -72,6 +75,7 @@ runs:
         REVIEW_OUTPUTS: ${{ inputs.review-outputs }}
         HUMAN_REVIEW_PATHS: ${{ inputs.human-review-paths }}
         SELF_APPROVERS: ${{ inputs.self-approvers }}
+        FEATURE_FLAG_CHECK: ${{ inputs.feature-flag-check }}
       with:
         retries: 3
         script: |

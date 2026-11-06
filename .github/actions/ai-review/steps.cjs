@@ -3,6 +3,7 @@
 const { overriddenBy, runUrl } = require('./constants.cjs');
 const { verdict } = require('./verdict.cjs');
 const { pathReasons } = require('./paths.cjs');
+const { flagReasons } = require('./flag-gates.cjs');
 const { decisionMarker, humanSection, storedDecision } = require('./decision.cjs');
 const {
   setStatus,
@@ -168,7 +169,11 @@ async function publish({ github, context, core }) {
   reportIncomplete(core, pr.head.sha, result);
   // The review's own reasons, which the summary comment keeps; the live ones
   // are read again whenever the human status is set.
-  const paths = await pathReasons(github, context, pr.number);
+  const paths = [
+    ...(await pathReasons(github, context, pr.number, pr.user.login)),
+    // A clearing behind a feature flag holds only on checks publish verifies.
+    ...(result.reasons.length === 0 ? await flagReasons({ github, context }, reviewers) : []),
+  ];
   const decision = {
     reasons: [...result.reasons, ...paths],
     reviewer: namedReviewer(pr.user) ?? result.reviewer,
@@ -176,8 +181,9 @@ async function publish({ github, context, core }) {
     scope: scopeOf(pr.user),
   };
   const live = await liveOrNull({ github, context, core }, pull);
-  // A reserved path or the needs-human-review label asks a person whatever
-  // the reviews decide, so neither is theirs to clear; unread labels fail closed.
+  // A reserved path, an unverified flag check, or the needs-human-review label
+  // asks a person whatever the reviews decide, so none is theirs to clear;
+  // unread labels fail closed.
   decision.cleared = Boolean(result.cleared) && paths.length === 0 && live?.length === 0;
   decision.since = await keptSince(github, context, pr.head.sha, decision.deferred);
   let written = await publishSummary({ github, context, core }, result, decision);

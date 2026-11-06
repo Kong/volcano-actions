@@ -100,6 +100,22 @@ test("a repository's reserved paths need a person", async (t) => {
   ]);
 });
 
+test("a reserved path's exceptions leave it to the reviewers in those authors' own PRs", async (t) => {
+  clearAfter(t, 'HUMAN_REVIEW_PATHS');
+  process.env.HUMAN_REVIEW_PATHS = 'ui/** except Octocat, hubot\nbilling/**';
+  const humanFor = async (author, filename) => {
+    claudeReviews(t, 'success', output([], 'Restyles a button.', routine));
+    const c = client({ files: [{ filename }] });
+    await publish({ github: c.github, context: context({ author }), core: core() });
+    return c.set(humanStatusContext)[0][2];
+  };
+  assert.equal(await humanFor('octocat', 'ui/button.tsx'), 'No human review needed.');
+  assert.equal(await humanFor('hubot', 'ui/button.tsx'), 'No human review needed.');
+  // Anyone else, or another reserved path, still needs a person.
+  assert.match(await humanFor('monalisa', 'ui/button.tsx'), /reserves for human review: ui\/button\.tsx/u);
+  assert.match(await humanFor('octocat', 'billing/plan.ts'), /reserves for human review: billing\/plan\.ts/u);
+});
+
 test('publish records an incomplete review as needing a person', async (t) => {
   claudeReviews(t, 'failure');
   const c = client();
