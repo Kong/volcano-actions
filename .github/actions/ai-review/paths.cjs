@@ -62,4 +62,11 @@ async function pathReasons(github, context, number, author = '') {
   return [`Changes a path this repository reserves for human review: ${reserved[0]}${more}.`];
 }
 
-module.exports = { globRegExp, pathReasons };
+// A repository can have a person review every PR a bot opens, whatever the
+// reviews decide, by setting HUMAN_REVIEW_BOTS to `true`.
+const authorReasons = (user) =>
+  process.env.HUMAN_REVIEW_BOTS === 'true' && user?.type === 'Bot'
+    ? [`Opened by ${user.login}, and this repository has a person review every bot's PR.`]
+    : [];
+
+module.exports = { globRegExp, pathReasons, authorReasons };

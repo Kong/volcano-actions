@@ -2,7 +2,7 @@
 
 const { overriddenBy, runUrl } = require('./constants.cjs');
 const { verdict } = require('./verdict.cjs');
-const { pathReasons } = require('./paths.cjs');
+const { pathReasons, authorReasons } = require('./paths.cjs');
 const { flagReasons } = require('./flag-gates.cjs');
 const { decisionMarker, humanSection, storedDecision } = require('./decision.cjs');
 const {
@@ -150,6 +150,7 @@ async function setVerdict({ github, context, core }, pull, result) {
 async function decisionOf({ github, context }, pull, result, reviewers) {
   const pr = context.payload.pull_request;
   const paths = [
+    ...authorReasons(pr.user),
     ...(await pathReasons(github, context, pr.number, pr.user.login)),
     // A clearing behind a feature flag holds only on checks publish verifies.
     ...(result.reasons.length === 0 ? await flagReasons({ github, context }, reviewers) : []),

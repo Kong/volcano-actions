@@ -23,6 +23,9 @@ inputs:
   feature-flag-check:
     description: For publish, a JavaScript regular expression that a line checking a feature flag matches, such as `useFeatureFlags|requireFeature`. A self-approver's scope behind a feature flag holds only when each check the review cites matches it, names the flag in quotes, and is a line the PR did not add or change. Without it, no such scope holds.
     default: ''
+  human-review-bots:
+    description: For publish, 'true' to have a person review every PR a bot opens, whatever the reviewers decide.
+    default: 'false'
   owners:
     description: For publish, the owners of the repository's paths, one line each as a glob and logins, such as `apps/web/** @octocat @hubot`. When a PR needs a person, the human status counts only an approval from an owner of each owned path it changes. A file's owners are those of the last line matching it, globs match as in human-review-paths, and the PR author never counts as an owner.
     default: ''
@@ -80,6 +83,7 @@ runs:
         SELF_APPROVERS: ${{ inputs.self-approvers }}
         FEATURE_FLAG_CHECK: ${{ inputs.feature-flag-check }}
         OWNERS: ${{ inputs.owners }}
+        HUMAN_REVIEW_BOTS: ${{ inputs.human-review-bots }}
       with:
         retries: 3
         script: |

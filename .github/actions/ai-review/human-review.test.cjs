@@ -116,6 +116,25 @@ test("a reserved path's exceptions leave it to the reviewers in those authors' o
   assert.match(await humanFor('octocat', 'billing/plan.ts'), /reserves for human review: billing\/plan\.ts/u);
 });
 
+test("a repository can have a person review every bot's PR", async (t) => {
+  clearAfter(t, 'HUMAN_REVIEW_BOTS');
+  const humanFor = async (type) => {
+    claudeReviews(t, 'success', output([], 'Bumps a dependency.', routine));
+    const c = client({ author: 'dependabot[bot]', authorType: type });
+    const ctx = context({ author: 'dependabot[bot]' });
+    ctx.payload.pull_request.user.type = type;
+    await publish({ github: c.github, context: ctx, core: core() });
+    return c.set(humanStatusContext)[0][2];
+  };
+  assert.equal(await humanFor('Bot'), 'No human review needed.');
+  process.env.HUMAN_REVIEW_BOTS = 'true';
+  assert.equal(
+    await humanFor('Bot'),
+    "Needs human review: Opened by dependabot[bot], and this repository has a person review every bot's PR.",
+  );
+  assert.equal(await humanFor('User'), 'No human review needed.');
+});
+
 test('publish records an incomplete review as needing a person', async (t) => {
   claudeReviews(t, 'failure');
   const c = client();
