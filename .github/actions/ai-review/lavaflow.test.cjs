@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statusContext, humanStatusContext, humanLabel, start, gate } = require('./ai-review.cjs');
-const { sha, review, clearAfter, client, context, core } = require('./test-helpers.cjs');
+const { sha, review, decided, clearAfter, client, context, core } = require('./test-helpers.cjs');
 
 // Volcano's Apps, as the workflow passes them.
 const apps = 'volcano-github-app[bot],volcano-staging[bot]';
@@ -270,4 +270,20 @@ test("the human gate re-sets a head passed on LavaFlow's review", async () => {
   // A head under review still waits for it.
   assert.deepEqual(await run([approval('reviewer')], [verdict('pending')]), []);
   assert.deepEqual(await run([approval('reviewer')], [verdict('failure', skipped.description)]), []);
+});
+
+// Only a head passed on LavaFlow's review drops the carry-over. Every other
+// head keeps it, as the repositories' required approvals do.
+test('an approval of an earlier commit carries to a head the skip did not pass, and not to one it did', async () => {
+  const run = async (statuses, comments) => {
+    const c = client({ reviews: [approval('reviewer', older)], statuses, comments });
+    await gate({ github: c.github, context: context({ action: 'labeled' }), core: core() });
+    return c.set(humanStatusContext).map(([, s, description]) => [s, description]);
+  };
+  const reviewed = verdict('success', 'No P0-P2 findings.');
+  assert.deepEqual(await run([reviewed], [decided(['Changes billing.'])]), [['success', 'Approved by reviewer.']]);
+  const skipped = verdict('success', 'Skipped: LavaFlow reviewed abcdef1 (review 41).');
+  assert.deepEqual(await run([skipped], []), [
+    ['pending', 'Needs human review: LavaFlow reviewed abcdef1 in place of the AI review.'],
+  ]);
 });
