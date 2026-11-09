@@ -12,7 +12,7 @@ const {
   joinNames,
 } = require('./constants.cjs');
 const { cap, humanReasons, clearsCode, suggestedReviewer, severityOf, parsed, completed } = require('./reviews.cjs');
-const { problems } = require('./problems.cjs');
+const { problems, sameQuestion } = require('./problems.cjs');
 
 const heading = 'AI review';
 const noneCompleted = 'No AI review completed.';
@@ -26,6 +26,19 @@ const readOnly =
 // as it wrote them.
 const listsFor = (count) =>
   count > 1 ? (lists) => [...new Set(lists.flat())].slice(0, 5) : (lists) => lists.flat().slice(0, 5);
+
+// Each review's reasons for a person, given as one list per review, with each
+// question once: a reason another review already asked, even in other words
+// (see sameQuestion), is left out. One review's reasons stay as it wrote them.
+function questions(lists) {
+  const kept = [];
+  for (const [review, reasons] of lists.entries()) {
+    for (const reason of reasons) {
+      if (!kept.some((k) => k.review !== review && sameQuestion(k.reason, reason))) kept.push({ reason, review });
+    }
+  }
+  return kept.map((k) => k.reason).slice(0, 5);
+}
 
 // A review's text at the schema's lengths, with its severities normalized.
 function shape(review) {
@@ -156,7 +169,7 @@ function verdict(reviewers, sha, url, candidates = []) {
   const coverage = coverageOf(missed, entries.length);
   const body = findingsBody({ shown, failed, notChecked: list([shown.notChecked]), short, url, coverage });
   const decision = {
-    reasons: [...deferralReasons(shown.findings), ...list(reviews.map((r) => humanReasons(r)))],
+    reasons: [...deferralReasons(shown.findings), ...questions(reviews.map((r) => humanReasons(r)))],
     reviewer: suggestedReviewer(reviews, candidates),
     by: joinNames(done.map((entry) => entry.name)),
     missed,
