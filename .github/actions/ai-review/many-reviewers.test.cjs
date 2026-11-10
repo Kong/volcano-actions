@@ -79,6 +79,44 @@ test('any review can ask for a person, and reasons and gaps combine without repe
   assert.deepEqual(three([{}, {}, {}]).reasons, []);
 });
 
+// Shaped like real reviews of one head: two models repeat a rule's question,
+// each placing the file its own way.
+test('a question another review asked in other words is asked once, in the first wording', () => {
+  const rule = 'Not copy only, not behind an existing feature flag: should it merge';
+  const v = three([
+    { human: asks([`${rule} (libs/pages/src/not-found.tsx)?`, 'Should the 404 page lead with the docs link?']) },
+    { human: asks([`libs/pages/src/not-found.tsx: ${rule}?`, `${rule}? Main changed file: \`not-found.tsx\`.`]) },
+    { human: asks(['Is this change behind a feature flag? If so, name the flag and its check (not-found.tsx).']) },
+  ]);
+  assert.deepEqual(v.reasons, [
+    `${rule} (libs/pages/src/not-found.tsx)?`,
+    'Should the 404 page lead with the docs link?',
+    'Is this change behind a feature flag? If so, name the flag and its check (not-found.tsx).',
+  ]);
+});
+
+test("different questions about one file stay apart, and one review's reasons stay as it wrote them", () => {
+  const path = 'libs/data/src/capabilities.ts';
+  const gate = `Should read-only projects see the plan prompt instead of their records (${path})?`;
+  const contract = `Will the API send plan_required on a read_only capability (${path})?`;
+  assert.deepEqual(three([{ human: asks([gate]) }, { human: asks([contract]) }, {}]).reasons, [gate, contract]);
+  for (const pair of [
+    [
+      'Should the deploy workflow gain `id-token: write` (deploy.yml)?',
+      'Should the deploy workflow gain `contents: write` (deploy.yml)?',
+    ],
+    [
+      'Should `legacyLogin` be removed from the public API (api.ts)?',
+      'Should `exportData` be removed from the public API (api.ts)?',
+    ],
+    ['Not copy only: should it merge (a.ts)?', 'Not copy only: should it merge (b.ts)?'],
+  ]) {
+    assert.deepEqual(three([{ human: asks([pair[0]]) }, { human: asks([pair[1]]) }, {}]).reasons, pair);
+  }
+  const own = ['Should it merge (a.ts)?', 'Should it merge (b.ts)?'];
+  assert.deepEqual(three([{ human: asks(own) }, {}, {}]).reasons, own);
+});
+
 test("the suggested reviewer is the first review's pick among the candidates", () => {
   const picks = (...reviewers) => three(reviewers.map((r) => ({ human: asks(['x'], ...r) }))).reviewer;
   assert.deepEqual(picks(['mallory'], [''], ['bob', 'owns it']), { login: 'bob', why: 'owns it' });
