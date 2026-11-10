@@ -100,6 +100,19 @@ test("different questions about one file stay apart, and one review's reasons st
   const gate = `Should read-only projects see the plan prompt instead of their records (${path})?`;
   const contract = `Will the API send plan_required on a read_only capability (${path})?`;
   assert.deepEqual(three([{ human: asks([gate]) }, { human: asks([contract]) }, {}]).reasons, [gate, contract]);
+  for (const pair of [
+    [
+      'Should the deploy workflow gain `id-token: write` (deploy.yml)?',
+      'Should the deploy workflow gain `contents: write` (deploy.yml)?',
+    ],
+    [
+      'Should `legacyLogin` be removed from the public API (api.ts)?',
+      'Should `exportData` be removed from the public API (api.ts)?',
+    ],
+    ['Not copy only: should it merge (a.ts)?', 'Not copy only: should it merge (b.ts)?'],
+  ]) {
+    assert.deepEqual(three([{ human: asks([pair[0]]) }, { human: asks([pair[1]]) }, {}]).reasons, pair);
+  }
   const own = ['Should it merge (a.ts)?', 'Should it merge (b.ts)?'];
   assert.deepEqual(three([{ human: asks(own) }, {}, {}]).reasons, own);
 });

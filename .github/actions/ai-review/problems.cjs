@@ -64,13 +64,29 @@ function similarTitles(a, b) {
 
 // Reasons for a person from different reviewers ask the same question when
 // their words, without file paths and code, overlap at least this much in at
-// least sharedWords words. Reviewers often repeat a rule's wording and place the
-// file differently. In a sample of real reviews, such repeats scored 0.62 and
-// up, while the closest pair that asked different questions scored 0.5.
+// least sharedWords words, and the files and code they name do not disagree.
+// Reviewers often repeat a rule's wording and place the file differently. In a
+// sample of real reviews, such repeats scored 0.62 and up, while the closest
+// pair that asked different questions scored 0.5. Questions that each name
+// something the other does not, such as one rule asked about two files, or
+// "drop `users.email`?" and "drop `orders.total`?", stay apart.
 const sameQuestionAt = 0.6;
 const pathsAndCode = /`[^`]*`|\S*\/\S*|\S+\.[a-z]{1,4}\b\S*/giu;
 
+// The files and code a reason names, without the quotes, punctuation, and
+// possessives around them.
+const named = (reason) =>
+  (reason.match(pathsAndCode) ?? []).map((target) =>
+    target.replaceAll(/^[\s([{"'`]+|(?:['’]s)?[\s)\]}"'`’:;,.?!…]*$/gu, ''),
+  );
+// One target is the other, or a path ending in it, as `not-found.tsx` is
+// libs/pages/src/not-found.tsx.
+const sameTarget = (a, b) => a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+const namesMore = (a, b) => a.some((t) => !b.some((u) => sameTarget(t, u)));
+
 function sameQuestion(a, b) {
+  const [ta, tb] = [named(a), named(b)];
+  if (namesMore(ta, tb) && namesMore(tb, ta)) return false;
   const [x, y] = [a, b].map((reason) => reason.replaceAll(pathsAndCode, ' '));
   if (normalized(x) === normalized(y)) return true;
   const { shared, dice } = overlap(x, y);
