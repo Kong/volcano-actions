@@ -110,6 +110,9 @@ test('the usage step writes the totals, and only the totals, for the job to uplo
     process.env.HOME = previous;
   });
   process.env.HOME = home;
+  // A developer's own Claude Code settings must not point the test at their logs.
+  process.env.CLAUDE_CONFIG_DIR = path.join(home, '.claude');
+  clearAfter(t, 'CLAUDE_CONFIG_DIR');
   Object.assign(process.env, { PROVIDER: 'claude', USAGE_FILE: out, GITHUB_RUN_ATTEMPT: '2' });
   clearAfter(t, 'PROVIDER', 'USAGE_FILE', 'GITHUB_RUN_ATTEMPT');
   const k = core();

@@ -24,6 +24,30 @@ async function costComments(github, context, number) {
   return comments.filter((c) => isCostComment(c));
 }
 
+// The cost comments as they are now. Paging through a busy PR's comments
+// can take longer than a read may be trusted, so the comments the listing
+// found are read again, one request each. One another writer deleted is gone.
+async function fresh(github, context, found) {
+  const comments = [];
+  for (const { id } of found) {
+    try {
+      comments.push((await github.rest.issues.getComment({ ...context.repo, comment_id: id })).data);
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  return comments;
+}
+
+// Deletes a comment another writer may already have deleted.
+async function deleteComment(github, context, id) {
+  try {
+    await github.rest.issues.deleteComment({ ...context.repo, comment_id: id });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+}
+
 const emptySum = () => ({ cost: 0, rounds: 0, partial: false });
 const emptyLedger = () => ({ rounds: {}, folded: { finished: emptySum(), cancelled: emptySum() }, seen: [] });
 
@@ -125,7 +149,7 @@ function costBody(full) {
     '',
     '</details>',
     '',
-    "<sub>A reviewer on a plan with no per-token bill, such as Codex on a ChatGPT workspace, is priced at its tokens' API list price. ~ marks a lower bound: a review that stopped early, whose model call in flight then is not counted, or a reviewer whose cost is unknown (?) because it recorded no usage or its model has no listed price.</sub>",
+    "<sub>A reviewer on a plan with no per-token bill is priced at its tokens' API list price. ~ marks a lower bound: a review that stopped early, whose model call in flight then is not counted, or a reviewer whose cost is unknown (?) because it recorded no usage or its model has no listed price.</sub>",
     '',
     `${ledgerPrefix}${Buffer.from(JSON.stringify(ledger)).toString('base64')} -->`,
   ].join('\n');
@@ -176,7 +200,7 @@ async function writeLedger(github, context, comments, ledger) {
       ...once,
     });
   }
-  for (const extra of rest) await github.rest.issues.deleteComment({ ...context.repo, comment_id: extra.id });
+  for (const extra of rest) await deleteComment(github, context, extra.id);
 }
 
 // A writer that read the ledger longer ago than this reads it again rather
@@ -198,8 +222,9 @@ const settle = 20_000;
 async function recordRound({ github, context }, key, round, timing = {}) {
   const { wait = pause, now = Date.now } = timing;
   for (let attempt = 0; attempt < 6; attempt += 1) {
+    const found = await costComments(github, context, context.payload.pull_request.number);
     const readAt = now();
-    const comments = await costComments(github, context, context.payload.pull_request.number);
+    const comments = await fresh(github, context, found);
     const ledger = merged(comments);
     if (has(ledger, key) && comments.length === 1) return;
     if (!has(ledger, key)) ledger.rounds[key] = round;

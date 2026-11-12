@@ -77,7 +77,7 @@ function metricsOf(run, spend, now) {
     sum(
       'ai_review.cost',
       'USD',
-      spend.filter((r) => r.priced).map((r) => point(r, { 'vcs.change.id': run.pr }, { asDouble: r.cost })),
+      spend.filter((r) => r.priced).map((r) => point(r, { 'vcs.change.id': String(run.pr) }, { asDouble: r.cost })),
     ),
     sum(
       'ai_review.reviews',
@@ -100,11 +100,12 @@ function logsOf(run, spend, now) {
     body: { stringValue: `AI review ${r.state} (${r.reason}): ${r.reviewer} spent $${r.cost.toFixed(4)}` },
     attributes: attributes({
       ...labels(run, r),
-      'vcs.change.id': run.pr,
+      // Semantic conventions define these IDs as strings.
+      'vcs.change.id': String(run.pr),
       // Logs only: one value per contributor would grow every metric series.
       'github.pr.author': run.author,
       'vcs.ref.head.revision': run.sha,
-      'cicd.pipeline.run.id': run.runId,
+      'cicd.pipeline.run.id': String(run.runId),
       'cicd.pipeline.run.attempt': run.attempt,
       'cicd.pipeline.run.url.full': run.url,
       'ai_review.cost.usd': r.cost,

@@ -51,6 +51,11 @@ function commentsClient(initial = []) {
     rest: {
       issues: {
         listComments: () => {},
+        getComment: resolved(({ comment_id: id }) => {
+          const comment = comments.find((c) => c.id === id);
+          if (!comment) throw Object.assign(new Error('Not Found'), { status: 404 });
+          return { data: { ...comment } };
+        }),
         createComment: resolved(({ body }) => {
           calls.push('create');
           comments.push({ id: (next += 1), user: { login: 'github-actions[bot]' }, body });
@@ -63,6 +68,7 @@ function commentsClient(initial = []) {
         }),
         deleteComment: resolved(({ comment_id: id }) => {
           calls.push('delete');
+          if (!comments.some((c) => c.id === id)) throw Object.assign(new Error('Not Found'), { status: 404 });
           comments = comments.filter((c) => c.id !== id);
           return { data: {} };
         }),

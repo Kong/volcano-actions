@@ -155,3 +155,43 @@ test('ledger writes are never retried, so a late retry cannot land a stale copy'
   );
   assert.deepEqual(options, [{ retries: 0 }]);
 });
+
+test('a duplicate another writer already deleted does not stop the round being recorded', async () => {
+  const bot = { login: 'github-actions[bot]' };
+  const c = commentsClient([{ id: 2, user: bot, body: costBody(ledgerOf(null)) }]);
+  // The listing still shows a duplicate another writer has since deleted.
+  const list = c.github.paginate;
+  c.github.paginate = async (...args) => [
+    ...(await list(...args)),
+    { id: 3, user: bot, body: costBody(ledgerOf(null)) },
+  ];
+  await recordRound(
+    { github: c.github, context: context() },
+    '9/1',
+    round('finished', 1, 1, '2026-11-11T10:00:00Z'),
+    noWait,
+  );
+  assert.deepEqual(Object.keys(ledgerOf(c.comments()[0]).rounds), ['9/1']);
+
+  // A duplicate deleted between this writer's read and its delete.
+  const d = commentsClient([
+    { id: 2, user: bot, body: costBody(ledgerOf(null)) },
+    { id: 3, user: bot, body: costBody(ledgerOf(null)) },
+  ]);
+  const remove = d.github.rest.issues.deleteComment;
+  d.github.rest.issues.deleteComment = async (args) => {
+    await remove(args);
+    return remove(args);
+  };
+  await recordRound(
+    { github: d.github, context: context() },
+    '9/1',
+    round('finished', 1, 1, '2026-11-11T10:00:00Z'),
+    noWait,
+  );
+  assert.deepEqual(Object.keys(ledgerOf(d.comments()[0]).rounds), ['9/1']);
+});
+
+test('the legend names no provider', () => {
+  assert.doesNotMatch(costBody(ledgerOf(null)), /Claude|Codex|ChatGPT/u);
+});
