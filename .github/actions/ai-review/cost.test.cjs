@@ -123,6 +123,11 @@ test('the export sends metrics and logs with the run and each reviewer', async (
   const logs = sent[1].body.resourceLogs[0];
   assert.equal(logs.scopeLogs[0].logRecords.length, 2);
   for (const record of logs.scopeLogs[0].logRecords) assert.equal(attrs(record)['github.pr.author'], 'author');
+  // Codex's whole-dollar cost is a double like Claude's, so the attribute keeps one type.
+  assert.deepEqual(
+    logs.scopeLogs[0].logRecords.map((r) => r.attributes.find((a) => a.key === 'ai_review.cost.usd').value),
+    [{ doubleValue: 6.4 }, { doubleValue: 3 }],
+  );
   // Metrics carry no author, so their series stay few.
   for (const metric of metrics) {
     for (const point of metric.sum.dataPoints) assert.ok(!('github.pr.author' in attrs(point)), metric.name);

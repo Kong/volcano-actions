@@ -16,7 +16,9 @@ function parseHeaders(raw) {
   return headers;
 }
 
+// A value already typed, such as `{ doubleValue }`, is sent as it is.
 const value = (v) => {
+  if (typeof v === 'object') return v;
   if (typeof v === 'boolean') return { boolValue: v };
   if (Number.isInteger(v)) return { intValue: String(v) };
   if (typeof v === 'number') return { doubleValue: v };
@@ -108,7 +110,8 @@ function logsOf(run, spend, now) {
       'cicd.pipeline.run.id': String(run.runId),
       'cicd.pipeline.run.attempt': run.attempt,
       'cicd.pipeline.run.url.full': run.url,
-      'ai_review.cost.usd': r.cost,
+      // A whole-dollar cost stays a double, so the attribute keeps one type.
+      'ai_review.cost.usd': { doubleValue: r.cost },
       'ai_review.cost.priced': r.priced,
       'ai_review.cost.known': r.known,
       'ai_review.calls': r.calls,

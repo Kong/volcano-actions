@@ -26,14 +26,17 @@ async function costComments(github, context, number) {
 
 // The cost comments as they are now. Paging through a busy PR's comments
 // can take longer than a read may be trusted, so the comments the listing
-// found are read again, one request each. One another writer deleted is gone.
+// found are read again, one request each. Null when one is gone: the writer
+// that deleted it merged it into another, which this read may have seen
+// before the merge.
 async function fresh(github, context, found) {
   const comments = [];
   for (const { id } of found) {
     try {
       comments.push((await github.rest.issues.getComment({ ...context.repo, comment_id: id })).data);
     } catch (error) {
-      if (error.status !== 404) throw error;
+      if (error.status === 404) return null;
+      throw error;
     }
   }
   return comments;
@@ -221,17 +224,26 @@ const settle = 20_000;
 // re-run of this step, is left as it is.
 async function recordRound({ github, context }, key, round, timing = {}) {
   const { wait = pause, now = Date.now } = timing;
+  let failed;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const found = await costComments(github, context, context.payload.pull_request.number);
     const readAt = now();
     const comments = await fresh(github, context, found);
+    if (!comments) continue;
     const ledger = merged(comments);
     if (has(ledger, key) && comments.length === 1) return;
     if (!has(ledger, key)) ledger.rounds[key] = round;
-    if (now() - readAt <= staleAfter) await writeLedger(github, context, comments, ledger);
+    if (now() - readAt <= staleAfter) {
+      // A failed write may still have landed; the next read tells.
+      try {
+        await writeLedger(github, context, comments, ledger);
+      } catch (error) {
+        failed = error;
+      }
+    }
     await wait(settle);
   }
-  throw new Error(`could not confirm round ${key} in the cost comment`);
+  throw new Error(`could not confirm round ${key} in the cost comment${failed ? `: ${failed.message}` : ''}`);
 }
 
 module.exports = { recordRound, roundOf, ledgerOf, costBody, totals, keptRounds };
