@@ -35,7 +35,6 @@ function report(core, spend) {
 
 // `timing` lets tests skip the ledger's waits.
 async function cost({ github, context, core, timing }) {
-  const pr = context.payload.pull_request;
   const superseded = await supersededHead(github, context, core);
   const spend = runSpend(process.env.REVIEWS, process.env.USAGE_OUTPUTS, superseded, context.runAttempt);
   if (spend.length === 0) {
@@ -43,17 +42,27 @@ async function cost({ github, context, core, timing }) {
     return;
   }
   report(core, spend);
+  // The ledger write waits at least `settle` before it re-checks, so the
+  // export goes out alongside it rather than after it.
+  await Promise.all([record(github, context, core, spend, timing), send(context, core, spend)]);
+}
+
+async function record(github, context, core, spend, timing) {
   const key = `${context.runId}/${context.runAttempt}`;
+  const round = roundOf(context.payload.pull_request.head.sha, spend, new Date().toISOString());
   try {
-    await recordRound({ github, context }, key, roundOf(pr.head.sha, spend, new Date().toISOString()), timing);
+    await recordRound({ github, context }, key, round, timing);
   } catch (error) {
     core.warning(`Could not update the PR's AI review cost comment: ${error.message}`);
   }
+}
+
+async function send(context, core, spend) {
   const endpoint = process.env.OTLP_ENDPOINT;
   if (!endpoint) return;
   const run = {
     repo: `${context.repo.owner}/${context.repo.repo}`,
-    pr: pr.number,
+    pr: context.payload.pull_request.number,
     runId: context.runId,
     attempt: context.runAttempt,
     url: runUrl(context),

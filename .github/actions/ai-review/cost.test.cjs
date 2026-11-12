@@ -158,6 +158,37 @@ test('the cost step records the round and exports it, and a refused export only 
   assert.match(k.warnings.at(-1), /Could not export the AI review cost/u);
 });
 
+test('the cost step exports without waiting for the ledger write to settle', async (t) => {
+  Object.assign(process.env, {
+    REVIEWS: needs('success'),
+    USAGE_OUTPUTS: usageDir(t),
+    OTLP_ENDPOINT: 'https://otlp.example',
+  });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS', 'OTLP_ENDPOINT');
+  const posted = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    resolved((url) => {
+      posted.push(url);
+      return { ok: true, text: () => Promise.resolve('{}') };
+    }),
+  );
+  const c = commentsClient();
+  const k = core();
+  // A cancel during the ledger's settle wait must not lose the export.
+  let postedBeforeSettle = null;
+  const wait = () => {
+    postedBeforeSettle ??= [...posted];
+    return Promise.resolve();
+  };
+  await cost({ github: c.github, context: context(), core: k, timing: { ...noWait, wait } });
+  assert.ok(postedBeforeSettle.includes('https://otlp.example/v1/metrics'), 'the export waited for the ledger');
+  assert.deepEqual(posted, ['https://otlp.example/v1/metrics', 'https://otlp.example/v1/logs']);
+  assert.equal(ledgerOf(c.comments()[0]).rounds['9/1'].state, 'finished');
+  assert.deepEqual(k.warnings, []);
+});
+
 test('the cost step records nothing when no review ran', async (t) => {
   Object.assign(process.env, { REVIEWS: needs('skipped'), USAGE_OUTPUTS: tempDir(t, 'usage-') });
   clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS');
