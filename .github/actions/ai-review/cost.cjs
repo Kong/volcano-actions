@@ -33,18 +33,19 @@ function report(core, spend) {
   }
 }
 
-async function cost({ github, context, core }) {
+// `timing` lets tests skip the ledger's waits.
+async function cost({ github, context, core, timing }) {
   const pr = context.payload.pull_request;
   const superseded = await supersededHead(github, context, core);
-  const spend = runSpend(process.env.REVIEWS, process.env.USAGE_OUTPUTS, superseded);
+  const spend = runSpend(process.env.REVIEWS, process.env.USAGE_OUTPUTS, superseded, context.runAttempt);
   if (spend.length === 0) {
-    core.notice('No AI review ran, so there is no cost to record.');
+    core.notice('No AI review ran in this attempt, so there is no cost to record.');
     return;
   }
   report(core, spend);
   const key = `${context.runId}/${context.runAttempt}`;
   try {
-    await recordRound({ github, context }, key, roundOf(pr.head.sha, spend, new Date().toISOString()));
+    await recordRound({ github, context }, key, roundOf(pr.head.sha, spend, new Date().toISOString()), timing);
   } catch (error) {
     core.warning(`Could not update the PR's AI review cost comment: ${error.message}`);
   }

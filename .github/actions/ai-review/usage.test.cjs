@@ -6,6 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 const { usage, claudeUsage, codexUsage } = require('./usage.cjs');
 const { tempDir } = require('./test-git.cjs');
+const { prices } = require('./prices.cjs');
+const { reviewWorkflow, jobsOf, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
 const { clearAfter, core } = require('./test-helpers.cjs');
 
 const jsonl = (...records) => `${records.map((r) => JSON.stringify(r)).join('\n')}\n`;
@@ -57,6 +59,8 @@ test('Claude usage counts each response once, by model, with its cache writes sp
       // A second content block of the same response repeats its usage.
       claudeLine('msg_1', claudeCall, '2026-11-11T10:00:01Z'),
       claudeLine('msg_2', { input_tokens: 1, output_tokens: 7, cache_read_input_tokens: 8000 }, '2026-11-11T10:05:00Z'),
+      // A placeholder Claude Code writes for an API error, which no model produced.
+      claudeLine('msg_err', { input_tokens: 0, output_tokens: 0 }, '2026-11-11T10:06:00Z', '<synthetic>'),
       // The last line was cut off when the job stopped.
     ) + '{"type":"assistant","message":{"id":"msg_3"',
   );
@@ -106,14 +110,15 @@ test('the usage step writes the totals, and only the totals, for the job to uplo
     process.env.HOME = previous;
   });
   process.env.HOME = home;
-  Object.assign(process.env, { PROVIDER: 'claude', USAGE_FILE: out });
-  clearAfter(t, 'PROVIDER', 'USAGE_FILE');
+  Object.assign(process.env, { PROVIDER: 'claude', USAGE_FILE: out, GITHUB_RUN_ATTEMPT: '2' });
+  clearAfter(t, 'PROVIDER', 'USAGE_FILE', 'GITHUB_RUN_ATTEMPT');
   const k = core();
   usage({ core: k });
   const written = JSON.parse(fs.readFileSync(out, 'utf8'));
   assert.equal(written.provider, 'claude');
+  assert.equal(written.attempt, 2);
   assert.equal(written.models['claude-opus-5-5'].calls, 1);
-  assert.deepEqual(Object.keys(written).toSorted(), ['end', 'models', 'provider', 'start']);
+  assert.deepEqual(Object.keys(written).toSorted(), ['attempt', 'end', 'models', 'provider', 'start']);
   assert.deepEqual(k.warnings, []);
 });
 
@@ -123,6 +128,13 @@ test('the usage step records no models, with a warning, when the session log is 
   clearAfter(t, 'PROVIDER', 'USAGE_FILE', 'CODEX_HOME');
   const k = core();
   usage({ core: k });
-  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), { provider: 'codex', models: {} });
+  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), { provider: 'codex', attempt: 1, models: {} });
   assert.match(k.warnings[0], /No codex usage was recorded/u);
+});
+
+test('every reviewer job names a model the price table lists', () => {
+  const jobs = jobsOf(reviewWorkflow());
+  const models = reviewerJobs(jobs).map((name) => outputsOf(jobs[name]).model);
+  assert.ok(models.length > 0);
+  for (const model of models) assert.ok(Object.hasOwn(prices, model), `${model} has no price in prices.cjs`);
 });

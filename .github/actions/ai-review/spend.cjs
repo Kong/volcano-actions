@@ -52,16 +52,24 @@ function reviewerSpend(id, job, usage, superseded) {
     cost,
     priced,
     recorded: usage !== null,
+    // A cost the comment cannot state exactly: no usage was recorded, or a
+    // model has no price.
+    known: usage !== null && priced,
     partial: job.result !== 'success',
     start: usage?.start,
     end: usage?.end,
   };
 }
 
-// Every reviewer in the cost job's `needs` that ran. A reviewer is a job with
-// a usage file or a `reviewer` output; any other job in `needs`, such as the
-// verdict, is not one. Skipped reviewers spent nothing.
-function runSpend(raw, dir, superseded) {
+// Whether this attempt ran the reviewer. Re-running failed jobs keeps the
+// other jobs' results and artifacts from the earlier attempt, whose cost step
+// already recorded them. Without a usage file, only a first attempt can tell.
+const ranIn = (usage, attempt) => (usage ? (usage.attempt ?? attempt) === attempt : attempt === 1);
+
+// Every reviewer in the cost job's `needs` that ran in this attempt. A
+// reviewer is a job with a usage file or a `reviewer` output; any other job in
+// `needs`, such as the verdict, is not one. Skipped reviewers spent nothing.
+function runSpend(raw, dir, superseded, attempt = 1) {
   let needs;
   try {
     needs = JSON.parse(raw || '{}');
@@ -72,7 +80,7 @@ function runSpend(raw, dir, superseded) {
   return jobs.flatMap(([id, job]) => {
     if (!job || typeof job !== 'object' || job.result === 'skipped') return [];
     const usage = dir ? usageOf(dir, id) : null;
-    if (!usage && !job.outputs?.reviewer) return [];
+    if ((!usage && !job.outputs?.reviewer) || !ranIn(usage, attempt)) return [];
     return [reviewerSpend(id, job, usage, superseded)];
   });
 }

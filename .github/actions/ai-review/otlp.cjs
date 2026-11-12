@@ -107,6 +107,7 @@ function logsOf(run, spend, now) {
       'cicd.pipeline.run.url.full': run.url,
       'ai_review.cost.usd': r.cost,
       'ai_review.cost.priced': r.priced,
+      'ai_review.cost.known': r.known,
       'ai_review.calls': r.calls,
       'ai_review.usage.recorded': r.recorded,
       'ai_review.usage.partial': r.partial,

@@ -78,6 +78,8 @@ function claudeUsage(dir) {
     for (const record of records(file)) {
       const message = record?.message;
       if (record?.type !== 'assistant' || !message?.id || !message.usage) continue;
+      // Claude Code writes placeholders, such as for an API error, that no model produced.
+      if (message.model === '<synthetic>') continue;
       responses.set(message.id, { model: String(message.model ?? 'unknown'), tokens: claudeTokens(message.usage) });
       times.push(record.timestamp);
     }
@@ -148,8 +150,10 @@ const readers = {
 };
 
 // The `usage` step: runs in a reviewer job after its provider, whatever the
-// provider's outcome, and writes { provider, models, start, end } to
-// USAGE_FILE. A missing log writes no models; nothing here fails the job.
+// provider's outcome, and writes { provider, attempt, models, start, end } to
+// USAGE_FILE. The run attempt lets the cost step skip usage a re-run carried
+// over from an earlier attempt. A missing log writes no models; nothing here
+// fails the job.
 function usage({ core }) {
   const provider = process.env.PROVIDER;
   const read = readers[provider];
@@ -161,7 +165,8 @@ function usage({ core }) {
     core.warning(`Could not read the ${provider} session log: ${error.message}`);
   }
   if (Object.keys(result.models).length === 0) core.warning(`No ${provider} usage was recorded.`);
-  fs.writeFileSync(process.env.USAGE_FILE, JSON.stringify({ provider, ...result }));
+  const attempt = Number(process.env.GITHUB_RUN_ATTEMPT) || 1;
+  fs.writeFileSync(process.env.USAGE_FILE, JSON.stringify({ provider, attempt, ...result }));
 }
 
 module.exports = { usage, claudeUsage, codexUsage, emptyTokens, addTokens };
