@@ -21,6 +21,7 @@ const { reviewersOf } = require('./reviews.cjs');
 const { postFindings } = require('./findings.cjs');
 const { start } = require('./start.cjs');
 const { keptSince, cutoff } = require('./deferral.cjs');
+const { countRound, roundsLine, handOff, handsOff } = require('./rounds.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
 // the same head. Without one, it still publishes, so a reopen finds a verdict.
@@ -33,12 +34,13 @@ async function headReviewedElsewhere(github, context) {
   return data.some((p) => p.number !== pr.number && p.state === 'open' && p.head.sha === pr.head.sha);
 }
 
-// The summary comment's body for a verdict and its decision.
+// The summary comment's body for a verdict and its decision. A failing one
+// says which round it is (see rounds.cjs).
 function summaryBody(context, result, decision) {
   const { sha } = context.payload.pull_request.head;
-  return result.state === 'error'
-    ? `${result.body}\n\n${decisionMarker(sha, decision)}`
-    : `${result.body}${humanSection(sha, decision)}`;
+  if (result.state === 'error') return `${result.body}\n\n${decisionMarker(sha, decision)}`;
+  const rounds = result.state === 'failure' && decision.rounds ? `\n\n${roundsLine(decision.rounds)}` : '';
+  return `${result.body}${rounds}${humanSection(sha, decision)}`;
 }
 
 // One summary comment per PR, edited in place, for the live head only: the
@@ -123,25 +125,32 @@ function warnUnread(core, reviewers) {
 // human status applies it.
 const unrecorded = 'The summary does not record the deferred finding(s) yet. If this stays, re-run the review.';
 
-// Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
-// head, then the summary comment, then each review's inline comments.
-async function publish({ github, context, core }) {
-  const pr = context.payload.pull_request;
-  const { reviewers, candidates } = reviewersOf(process.env.REVIEWS, process.env.REVIEW_OUTPUTS);
-  // A job-level `if` sees every ancestor's result in `needs`, so start's
-  // success runs this job when start skipped the review or the run was
-  // cancelled. The head keeps whatever status start left it.
+// The live PR, or null when this run publishes no verdict. A job-level `if`
+// sees every ancestor's result in `needs`, so start's success runs the verdict
+// job when start skipped the review or the run was cancelled; the head keeps
+// whatever status start left it.
+async function publishable({ github, context, core }, reviewers) {
+  const short = context.payload.pull_request.head.sha.slice(0, 7);
   if (reviewers.length > 0 && reviewers.every((r) => ['skipped', 'cancelled'].includes(r.result))) {
-    core.notice(`Publishing no verdict for ${pr.head.sha.slice(0, 7)}: every AI review was skipped or cancelled.`);
-    return;
+    core.notice(`Publishing no verdict for ${short}: every AI review was skipped or cancelled.`);
+    return null;
   }
   const pull = await livePull(github, context);
   if (pull.state !== 'open' && (await headReviewedElsewhere(github, context))) {
-    core.notice(
-      `Skipping the verdict for ${pr.head.sha.slice(0, 7)}: this PR is closed and another open PR has the same head.`,
-    );
-    return;
+    core.notice(`Skipping the verdict for ${short}: this PR is closed and another open PR has the same head.`);
+    return null;
   }
+  return pull;
+}
+
+// Publishes the reviewer jobs' verdict: the commit statuses for the reviewed
+// head, then the summary comment, then each review's inline comments, and
+// hands a PR whose review has not converged to a person.
+async function publish({ github, context, core }) {
+  const pr = context.payload.pull_request;
+  const { reviewers, candidates } = reviewersOf(process.env.REVIEWS, process.env.REVIEW_OUTPUTS);
+  const pull = await publishable({ github, context, core }, reviewers);
+  if (!pull) return;
   warnUnread(core, reviewers);
   const result = verdict(reviewers, pr.head.sha, runUrl(context), reviewerCandidates(candidates));
   // The status goes first so a failed comment cannot leave the head pending.
@@ -161,6 +170,7 @@ async function publish({ github, context, core }) {
     reasons: [...result.reasons, ...paths],
     reviewer: result.reviewer,
     deferred: result.deferred ?? [],
+    rounds: await countRound({ github, context, core }, pull, result.state !== 'error'),
   };
   const live = await liveOrNull({ github, context, core }, pull);
   // A reserved path or the needs-human-review label asks a person whatever
@@ -174,6 +184,8 @@ async function publish({ github, context, core }) {
   const settled = live !== null && (await settleHuman({ github, context, core }, pull, decision, live));
   if (held && written && settled) await setStatus(github, context, pr.head.sha, 'success', result.description);
   await postFindings({ github, context, core }, reviewers);
+  // Only the live head's review, whose summary records the round, hands off.
+  if (written && handsOff(decision.rounds, result.state, pull)) await handOff({ github, context, core }, pull);
 }
 
 // Accepts the current head over a failing verdict, or a fork PR that is never

@@ -18,6 +18,16 @@ so a fix lands once. When a push replaces the head under review, the run
 reviewing the new head cancels the older head's review, whose verdict nobody
 would read.
 
+The review does not run on draft PRs, so push work in progress to a draft.
+Each PR gets three rounds of review since it was last marked ready for review
+or reopened; a round is a completed review of a new head, so a re-run of the
+same head or a review that did not complete adds none. When the third round
+still finds P0-P2 problems, the review is not converging: it moves the PR back
+to draft and comments asking a person to re-assess it, deciding whether the
+findings stand and whether to keep fixing, redesign, or split the PR. Marking
+it ready for review starts a new set of three rounds. The summary comment says
+which round each failing review is, and its marker records the count.
+
 ### Reviewers
 
 Each reviewer is a job in `ai-review.yml` that runs one provider: today Claude

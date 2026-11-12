@@ -6,11 +6,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { marker } = require('./ai-review.cjs');
 const { tempDir } = require('./test-git.cjs');
+const { sha, context, core } = require('./test-context.cjs');
 
 const root = path.join(__dirname, '../../..');
 const readRepo = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-const sha = 'abcdef1234567890';
 const url = 'https://github.com/Kong/volcano-hosting/actions/runs/9';
 const finding = (severity, overrides = {}) => ({
   severity,
@@ -108,6 +108,10 @@ const clientDefaults = () => ({
   // [message, status] to reject a review comment with, or null to accept it.
   rejectComment: () => null,
   commitAuthor: () => null,
+  // The PR's timeline events, as { event, created_at }.
+  timeline: [],
+  failTimeline: false,
+  failDraft: false,
 });
 
 // Makes endpoints that record each call by name before answering.
@@ -127,10 +131,13 @@ const issuesApi = (record) => ({
     data: { id: args.comment_id, updated_at: '2026-10-23T12:00:05Z' },
   })),
   removeLabel: record('removeLabel'),
+  listEventsForTimeline: () => {},
 });
 
 const livePull = (o, number) => ({
   number,
+  node_id: `PR_${number}`,
+  created_at: '2026-10-23T10:00:00Z',
   draft: o.draft,
   state: o.state,
   labels: o.labels,
@@ -190,6 +197,10 @@ function paginator(o, rest, calls) {
     [rest.pulls.listReviews, list('listReviews', o.reviews, o.failReviews && ['Server Error', 500])],
     [rest.pulls.listFiles, list('listFiles', o.files, o.failFiles && ['Server Error', 500])],
     [
+      rest.issues.listEventsForTimeline,
+      list('listEventsForTimeline', o.timeline, o.failTimeline && ['Server Error', 500]),
+    ],
+    [
       rest.pulls.listReviewComments,
       list('listReviewComments', o.reviewComments, o.failReviewComments && ['Server Error', 500]),
     ],
@@ -203,7 +214,12 @@ function client(options = {}) {
   const calls = [];
   const record = recorder(calls);
   const rest = { issues: issuesApi(record), pulls: pullsApi(o, record), repos: reposApi(o, record) };
-  const github = { paginate: paginator(o, rest, calls), rest };
+  const graphql = endpoint((query, variables) => {
+    calls.push({ ...variables, query, call: 'graphql' });
+    if (o.failDraft) throw httpError('Resource not accessible by integration', 403);
+    return {};
+  });
+  const github = { paginate: paginator(o, rest, calls), rest, graphql };
   const named = (call) => calls.filter((c) => c.call === call);
   // The statuses set for one context, as [sha, state, description].
   const set = (name) =>
@@ -211,68 +227,6 @@ function client(options = {}) {
       .filter((s) => s.context === name)
       .map((s) => [s.sha, s.state, s.description]);
   return { github, calls, named, set };
-}
-
-function context({
-  sender = { login: 'reviewer', type: 'User' },
-  author = 'author',
-  headRepo = 'Kong/volcano-hosting',
-  actor = 'author',
-  action = 'synchronize',
-  runAttempt = 1,
-  draft = false,
-  eventName = 'pull_request_target',
-  workflowRun,
-} = {}) {
-  if (workflowRun) {
-    return {
-      eventName: 'workflow_run',
-      actor,
-      runAttempt,
-      repo: { owner: 'Kong', repo: 'volcano-hosting' },
-      serverUrl: 'https://github.com',
-      runId: 9,
-      payload: { workflow_run: workflowRun },
-    };
-  }
-  return {
-    eventName,
-    actor,
-    runAttempt,
-    repo: { owner: 'Kong', repo: 'volcano-hosting' },
-    serverUrl: 'https://github.com',
-    runId: 9,
-    payload: {
-      action,
-      sender,
-      pull_request: {
-        number: 7,
-        draft,
-        user: { login: author },
-        base: { ref: 'main' },
-        head: { sha, repo: headRepo && { full_name: headRepo } },
-      },
-    },
-  };
-}
-
-function core() {
-  const failures = [];
-  const warnings = [];
-  const notices = [];
-  const outputs = {};
-  return {
-    failures,
-    warnings,
-    notices,
-    outputs,
-    setFailed: (message) => failures.push(message),
-    notice: (message) => notices.push(message),
-    warning: (message) => warnings.push(message),
-    setOutput: (name, value) => {
-      outputs[name] = value;
-    },
-  };
 }
 
 module.exports = {
