@@ -30,7 +30,8 @@ rethink the approach, or push back on findings they think are wrong. The
 comment tells a coding agent working on the PR to stop fixing, summarize the
 findings for the author, and wait for their decision. Marking the PR ready for
 review starts a new set. If the PR cannot be moved to draft, the comment says
-the review goes on and asks the author to convert it, once per set. The
+the review goes on and asks the author to convert it, once per set; a later
+round that does move it says so. The
 summary comment says which failing round each review is, and its marker
 records the count.
 

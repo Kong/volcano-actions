@@ -84,9 +84,12 @@ function roundsLine({ count }) {
 const authorOf = (pull) =>
   pull.user?.type === 'User' && /^[A-Za-z0-9-]+$/u.test(pull.user.login) ? `@${pull.user.login}` : 'PR author';
 
+// Says the PR is a draft now; a later round reads it to tell whether this
+// set's comment still says the review goes on.
+const moved = 'so the AI review moved this PR back to draft';
 const pausedLine = (drafted) =>
   drafted
-    ? 'so the AI review moved this PR back to draft, where it reviews no pushes, until you decide how to go on.'
+    ? `${moved}, where it reviews no pushes, until you decide how to go on.`
     : 'but the AI review could not move this PR back to draft, so it keeps reviewing each push. Convert the PR to draft yourself while you decide how to go on.';
 
 // The hand-off speaks to the author, and to a coding agent working for them,
@@ -111,35 +114,51 @@ const handOffBody = ({ short, count, drafted, author }) =>
     `Marking the PR ready for review starts a new set of ${roundLimit} rounds with a review of the current head. To accept the findings as they stand, mark it ready, and once that review finishes, add the \`ai-review-override\` label.`,
   ].join('\n');
 
-// Whether this set's hand-off comment is already on the PR, so a PR the review
-// could not move to draft is asked once, not on every failing push.
-async function askedSince(github, context, number, since) {
+// Whether this set's hand-off comment already says what is true, so a PR the
+// review could not move to draft is asked once, not on every failing push. A
+// conversion that succeeds after an earlier one failed is said again: the
+// earlier comment says the review goes on.
+async function alreadyAsked(github, context, number, since, drafted) {
   const comments = await github.paginate(github.rest.issues.listComments, {
     ...context.repo,
     issue_number: number,
     per_page: 100,
   });
-  return comments.some(
+  const asked = comments.filter(
     (c) =>
       c.user?.login === 'github-actions[bot]' &&
       c.body?.startsWith(roundsMarker) &&
       Date.parse(c.created_at) >= Date.parse(since),
   );
+  return drafted ? asked.some((c) => c.body.includes(moved)) : asked.length > 0;
+}
+
+// The live PR when it is still open, ready, at this head, and failing its
+// verdict; otherwise null. A push since this review began is the newer head's
+// to judge, and the author may have acted already, by drafting, closing, or
+// overriding: an override accepted while this review published decided the
+// head, and a ready_for_review after a hand-off would review it again and
+// replace it. Like the other steps beside the verdict, a failed read only
+// warns.
+async function stillFailing({ github, context, core }, sha) {
+  try {
+    const pull = await livePull(github, context);
+    if (pull.head.sha !== sha || pull.state !== 'open' || pull.draft) return null;
+    return (await verdictStatus(github, context, sha))?.state === 'failure' ? pull : null;
+  } catch (error) {
+    core.warning(`Could not read the PR before handing it back to its author: ${error.message}`);
+    return null;
+  }
 }
 
 // Moves the PR to draft, which start() never reviews, and asks the author to
-// re-assess the approach. The PR and its verdict are read again first: a push
-// since this review began is the newer head's to judge, and the author may
-// have acted already, by drafting, closing, or overriding.
-// The conversion takes GraphQL; a failure only warns, and the comment then
-// says the review goes on.
+// re-assess the approach, once the PR and its verdict are read again. The
+// conversion takes GraphQL; a failure only warns, and the comment then says
+// the review goes on.
 async function handOff({ github, context, core }, record) {
   const sha = context.payload.pull_request.head.sha;
-  const pull = await livePull(github, context);
-  if (pull.head.sha !== sha || pull.state !== 'open' || pull.draft) return;
-  // An override accepted while this review published decided the head; a
-  // ready_for_review after a hand-off would review it again and replace it.
-  if ((await verdictStatus(github, context, sha))?.state !== 'failure') return;
+  const pull = await stillFailing({ github, context, core }, sha);
+  if (!pull) return;
   let drafted = false;
   try {
     await github.graphql(
@@ -151,7 +170,7 @@ async function handOff({ github, context, core }, record) {
     core.warning(`Could not move the PR back to draft after ${record.count} failing rounds: ${error.message}`);
   }
   try {
-    if (await askedSince(github, context, pull.number, record.since)) return;
+    if (await alreadyAsked(github, context, pull.number, record.since, drafted)) return;
     const body = handOffBody({ short: sha.slice(0, 7), count: record.count, drafted, author: authorOf(pull) });
     await github.rest.issues.createComment({ ...context.repo, issue_number: pull.number, body });
   } catch (error) {
