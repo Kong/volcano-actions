@@ -104,9 +104,6 @@ function logsOf(run, spend, now) {
       ...labels(run, r),
       // Semantic conventions define these IDs as strings.
       'vcs.change.id': String(run.pr),
-      // Logs only: one value per contributor would grow every metric series.
-      'github.pr.author': run.author,
-      'vcs.ref.head.revision': run.sha,
       'cicd.pipeline.run.id': String(run.runId),
       'cicd.pipeline.run.attempt': run.attempt,
       'cicd.pipeline.run.url.full': run.url,
