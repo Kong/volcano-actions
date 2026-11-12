@@ -19,17 +19,20 @@ reviewing the new head cancels the older head's review, whose verdict nobody
 would read.
 
 The review does not run on draft PRs, so push work in progress to a draft.
-Each PR gets three rounds of review since it was last marked ready for review
-or reopened; a round is a completed review of a new head, so a re-run of the
-same head or a review that did not complete adds none. When the third round
-still finds P0-P2 problems, the review is not converging: it moves the PR back
-to draft and comments asking the author, by name unless a bot opened the PR, to
-re-assess the approach: split the PR, simplify the design, rethink the
-approach, or push back on findings they think are wrong. The comment tells a
-coding agent working on the PR to stop fixing, summarize the findings for the
-author, and wait for their decision. Marking it ready for review starts a new
-set of three rounds. The summary comment says
-which round each failing review is, and its marker records the count.
+Since a PR was last marked ready for review, reopened, or opened, the review
+counts its failing rounds in a row: a completed review of a new head that finds
+P0-P2 problems adds one, and a passing review resets the count, since the
+review converged. A re-run of the same head or a review that did not complete
+adds none. When three rounds in a row fail, the review is not converging: it
+moves the PR back to draft and comments asking the author, by name unless a bot
+opened the PR, to re-assess the approach: split the PR, simplify the design,
+rethink the approach, or push back on findings they think are wrong. The
+comment tells a coding agent working on the PR to stop fixing, summarize the
+findings for the author, and wait for their decision. Marking the PR ready for
+review starts a new set. If the PR cannot be moved to draft, the comment says
+the review goes on and asks the author to convert it, once per set. The
+summary comment says which failing round each review is, and its marker
+records the count.
 
 ### Reviewers
 

@@ -2,12 +2,12 @@
 
 const { roundsMarker } = require('./constants.cjs');
 const { storedMarkerOf } = require('./decision.cjs');
-const { summaryComment } = require('./github.cjs');
+const { summaryComment, livePull } = require('./github.cjs');
 
-// The rounds the AI review spends on a PR before a person decides how to go
-// on. A review that still finds P0-P2 problems after this many rounds is not
-// converging: more pushes would spend more reviews without a person's call on
-// whether the findings stand, or whether to keep fixing, redesign, or split.
+// The failing rounds in a row the AI review spends on a PR before its author
+// decides how to go on. A review that keeps finding P0-P2 problems is not
+// converging: more pushes would spend more reviews without the author's call
+// on whether the findings stand, or whether to keep fixing, redesign, or split.
 const roundLimit = 3;
 
 // When the current set of rounds began: the last time the PR was marked ready
@@ -26,41 +26,55 @@ async function roundsSince(github, context, pull) {
   return starts.reduce((last, at) => (Date.parse(at) > Date.parse(last) ? at : last), pull.created_at);
 }
 
-// The rounds the summary comment records for the set that began at `since`,
-// or none when it records an earlier set or none at all.
-function storedCount(comment, since) {
+// The rounds record the summary comment's marker holds, whatever its set, or
+// null when it holds none.
+function storedRecord(comment) {
   const rounds = storedMarkerOf(comment)?.rounds;
-  if (rounds?.since !== since || !Number.isInteger(rounds.count) || rounds.count < 0) return { count: 0, sha: null };
-  return { count: rounds.count, sha: typeof rounds.sha === 'string' ? rounds.sha : null };
+  const valid =
+    typeof rounds?.since === 'string' &&
+    Number.isInteger(rounds.count) &&
+    rounds.count >= 0 &&
+    (rounds.sha === null || typeof rounds.sha === 'string');
+  return valid ? { since: rounds.since, count: rounds.count, sha: rounds.sha } : null;
 }
 
-// This review's place in the current set of rounds. A review that did not
-// complete is not a round, and a re-run of the head the last round reviewed
+// The record's count for the set that began at `since`; an earlier set's is none.
+const storedCount = (record, since) => (record?.since === since ? record : { count: 0, sha: null });
+
+// This review's place in the current set: the failing rounds in a row. A
+// passing round has converged and resets the count. A review that did not
+// complete is not a round, and a re-run of the head the last round failed
 // repeats that round rather than adding one.
-function nextRounds(stored, since, sha, completed) {
-  if (!completed) return { since, count: stored.count, sha: stored.sha };
-  return { since, count: stored.sha === sha ? stored.count : stored.count + 1, sha };
+function nextRounds(stored, since, sha, state) {
+  if (state === 'error') return { since, count: stored.count, sha: stored.sha };
+  if (state !== 'failure') return { since, count: 0, sha };
+  return { since, count: stored.sha === sha && stored.count > 0 ? stored.count : stored.count + 1, sha };
 }
 
-// Counts this review's round, or returns null when the timeline or summary
-// cannot be read, which leaves the PR to the reviews as before.
-async function countRound({ github, context, core }, pull, completed) {
+// Counts this review's round. When the timeline cannot be read, the summary's
+// record carries forward unchanged, so a transient error neither resets the
+// count nor hands the PR off; `counted` is then false.
+async function countRound({ github, context, core }, pull, state) {
+  let record = null;
   try {
+    record = storedRecord(await summaryComment(github, context, pull.number));
     const since = await roundsSince(github, context, pull);
-    const comment = await summaryComment(github, context, pull.number);
-    return nextRounds(storedCount(comment, since), since, context.payload.pull_request.head.sha, completed);
+    return {
+      record: nextRounds(storedCount(record, since), since, context.payload.pull_request.head.sha, state),
+      counted: true,
+    };
   } catch (error) {
     core.warning(`Could not count the AI review's rounds on this PR: ${error.message}`);
-    return null;
+    return { record, counted: false };
   }
 }
 
 // The summary's line on the rounds, while the review still finds problems.
 function roundsLine({ count }) {
-  const round = `Round ${count} of ${roundLimit} since this PR was last marked ready for review`;
+  const since = 'since this PR was last marked ready for review';
   return count >= roundLimit
-    ? `${round}, so the author re-assesses the approach before the AI review reviews more pushes.`
-    : `${round}. If round ${roundLimit} still finds P0-P2 problems, the AI review moves the PR back to draft for the author to re-assess the approach.`;
+    ? `${count} rounds in a row have found P0-P2 problems ${since}, so the AI review asks the author to re-assess the approach.`
+    : `Failing round ${count} of ${roundLimit} ${since}. If ${roundLimit} rounds in a row find P0-P2 problems, the AI review moves the PR back to draft for the author to re-assess the approach.`;
 }
 
 // Whom the hand-off asks: the author by name, so GitHub notifies them, unless
@@ -68,16 +82,21 @@ function roundsLine({ count }) {
 const authorOf = (pull) =>
   pull.user?.type === 'User' && /^[A-Za-z0-9-]+$/u.test(pull.user.login) ? `@${pull.user.login}` : 'PR author';
 
+const pausedLine = (drafted) =>
+  drafted
+    ? 'so the AI review moved this PR back to draft, where it reviews no pushes, until you decide how to go on.'
+    : 'but the AI review could not move this PR back to draft, so it keeps reviewing each push. Convert the PR to draft yourself while you decide how to go on.';
+
 // The hand-off speaks to the author, and to a coding agent working for them,
 // which reads PR comments: when fixes keep producing findings, the approach is
 // usually the problem, and the agent must hand that call back to the author
 // rather than push another fix.
-const handOffBody = (short, drafted, author) =>
+const handOffBody = ({ short, count, drafted, author }) =>
   [
     roundsMarker,
     '### AI review: re-assess the approach',
     '',
-    `${author}, the AI review still finds P0-P2 problems at ${short} after ${roundLimit} rounds since this PR was last marked ready for review. When each fix brings new findings, the approach is usually the problem rather than the next fix, so ${drafted ? 'the AI review moved this PR back to draft and' : 'the AI review'} will not review more pushes until you decide how to go on.${drafted ? '' : ' It could not move the PR back to draft, so convert it yourself while you decide.'}`,
+    `${author}, the AI review has found P0-P2 problems in ${count} rounds in a row, through ${short}, since this PR was last marked ready for review. When each fix brings new findings, the approach is usually the problem rather than the next fix, ${pausedLine(drafted)}`,
     '',
     'Consider:',
     '- **Split it** into smaller PRs that each review cleanly.',
@@ -85,16 +104,36 @@ const handOffBody = (short, drafted, author) =>
     '- **Rethink the approach** where the findings keep landing in the same place.',
     '- **Push back** on findings you think are wrong: reply on each with a reason, or the follow-up work it waits for, and the next round reads it.',
     '',
-    `**Coding agents:** stop here and do not push another fix for these findings. Tell the author this PR did not converge after ${roundLimit} AI review rounds, summarize the open findings and where they cluster, recommend one of the options above, and wait for the author's decision before changing the code or marking the PR ready for review.`,
+    `**Coding agents:** stop here and do not push another fix for these findings. Tell the author this PR did not converge after ${count} AI review rounds, summarize the open findings and where they cluster, recommend one of the options above, and wait for the author's decision before changing the code or marking the PR ready for review.`,
     '',
-    `Marking the PR ready for review starts a new set of ${roundLimit} rounds.`,
+    `Marking the PR ready for review starts a new set of ${roundLimit} rounds with a review of the current head. To accept the findings as they stand, mark it ready, and once that review finishes, add the \`ai-review-override\` label.`,
   ].join('\n');
 
+// Whether this set's hand-off comment is already on the PR, so a PR the review
+// could not move to draft is asked once, not on every failing push.
+async function askedSince(github, context, number, since) {
+  const comments = await github.paginate(github.rest.issues.listComments, {
+    ...context.repo,
+    issue_number: number,
+    per_page: 100,
+  });
+  return comments.some(
+    (c) =>
+      c.user?.login === 'github-actions[bot]' &&
+      c.body?.startsWith(roundsMarker) &&
+      Date.parse(c.created_at) >= Date.parse(since),
+  );
+}
+
 // Moves the PR to draft, which start() never reviews, and asks the author to
-// re-assess the approach. The conversion takes GraphQL; a failure only warns, and the
-// comment then still asks.
-async function handOff({ github, context, core }, pull) {
-  const short = context.payload.pull_request.head.sha.slice(0, 7);
+// re-assess the approach. The PR is read again first: a push since this review
+// began is the newer head's to judge, and the author may have acted already.
+// The conversion takes GraphQL; a failure only warns, and the comment then
+// says the review goes on.
+async function handOff({ github, context, core }, record) {
+  const sha = context.payload.pull_request.head.sha;
+  const pull = await livePull(github, context);
+  if (pull.head.sha !== sha || pull.state !== 'open' || pull.draft) return;
   let drafted = false;
   try {
     await github.graphql(
@@ -103,22 +142,19 @@ async function handOff({ github, context, core }, pull) {
     );
     drafted = true;
   } catch (error) {
-    core.warning(`Could not move the PR back to draft after ${roundLimit} rounds: ${error.message}`);
+    core.warning(`Could not move the PR back to draft after ${record.count} failing rounds: ${error.message}`);
   }
   try {
-    await github.rest.issues.createComment({
-      ...context.repo,
-      issue_number: pull.number,
-      body: handOffBody(short, drafted, authorOf(pull)),
-    });
+    if (await askedSince(github, context, pull.number, record.since)) return;
+    const body = handOffBody({ short: sha.slice(0, 7), count: record.count, drafted, author: authorOf(pull) });
+    await github.rest.issues.createComment({ ...context.repo, issue_number: pull.number, body });
   } catch (error) {
-    core.warning(`Could not ask the author to re-assess the PR after ${roundLimit} rounds: ${error.message}`);
+    core.warning(`Could not ask the author to re-assess the PR: ${error.message}`);
   }
 }
 
-// Whether this round hands the PR back to its author: it failed, it is at least the
-// last round, and the PR is still open and ready for review.
-const handsOff = (rounds, state, pull) =>
-  rounds !== null && state === 'failure' && rounds.count >= roundLimit && pull.state === 'open' && !pull.draft;
+// Whether this round hands the PR back to its author: it was counted, it
+// failed, and it reaches the limit.
+const handsOff = (round, state) => round.counted && state === 'failure' && round.record.count >= roundLimit;
 
 module.exports = { roundLimit, countRound, nextRounds, roundsLine, handOff, handsOff };

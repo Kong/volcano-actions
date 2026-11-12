@@ -39,7 +39,10 @@ async function headReviewedElsewhere(github, context) {
 function summaryBody(context, result, decision) {
   const { sha } = context.payload.pull_request.head;
   if (result.state === 'error') return `${result.body}\n\n${decisionMarker(sha, decision)}`;
-  const rounds = result.state === 'failure' && decision.rounds ? `\n\n${roundsLine(decision.rounds)}` : '';
+  // Only a round this review counted for its head; a record carried over an
+  // unread timeline is an earlier head's.
+  const counted = result.state === 'failure' && decision.rounds?.sha === sha && decision.rounds.count > 0;
+  const rounds = counted ? `\n\n${roundsLine(decision.rounds)}` : '';
   return `${result.body}${rounds}${humanSection(sha, decision)}`;
 }
 
@@ -170,8 +173,9 @@ async function publish({ github, context, core }) {
     reasons: [...result.reasons, ...paths],
     reviewer: result.reviewer,
     deferred: result.deferred ?? [],
-    rounds: await countRound({ github, context, core }, pull, result.state !== 'error'),
   };
+  const round = await countRound({ github, context, core }, pull, result.state);
+  decision.rounds = round.record;
   const live = await liveOrNull({ github, context, core }, pull);
   // A reserved path or the needs-human-review label asks a person whatever
   // the reviews decide, so neither is theirs to clear; unread labels fail closed.
@@ -185,7 +189,7 @@ async function publish({ github, context, core }) {
   if (held && written && settled) await setStatus(github, context, pr.head.sha, 'success', result.description);
   await postFindings({ github, context, core }, reviewers);
   // Only the live head's review, whose summary records the round, hands off.
-  if (written && handsOff(decision.rounds, result.state, pull)) await handOff({ github, context, core }, pull);
+  if (written && handsOff(round, result.state)) await handOff({ github, context, core }, round.record);
 }
 
 // Accepts the current head over a failing verdict, or a fork PR that is never
