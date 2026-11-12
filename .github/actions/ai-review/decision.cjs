@@ -11,8 +11,9 @@ const { clean, code } = require('./constants.cjs');
 // `deferred` names the problems the author deferred, by their keys (see
 // problems.cjs), and `since`, when GitHub recorded the summary that first
 // reported them, says only an approval of this commit given after then counts
-// (see deferral.cjs). `rounds` counts the reviews since the PR was last marked
-// ready for review (see rounds.cjs); it carries across heads.
+// (see deferral.cjs). `rounds` counts the failing rounds in a row since the PR
+// was last marked ready for review, reopened, or opened (see rounds.cjs); it
+// carries across heads.
 const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null, deferred = [], rounds = null }) =>
   `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since, deferred, rounds })).toString('base64')} -->`;
 

@@ -2,7 +2,7 @@
 
 const { roundsMarker } = require('./constants.cjs');
 const { storedMarkerOf } = require('./decision.cjs');
-const { summaryComment, livePull } = require('./github.cjs');
+const { summaryComment, livePull, verdictStatus } = require('./github.cjs');
 
 // The failing rounds in a row the AI review spends on a PR before its author
 // decides how to go on. A review that keeps finding P0-P2 problems is not
@@ -53,9 +53,11 @@ function nextRounds(stored, since, sha, state) {
 
 // Counts this review's round. When the timeline cannot be read, the summary's
 // record carries forward unchanged, so a transient error neither resets the
-// count nor hands the PR off; `counted` is then false.
+// count nor hands the PR off; `counted` is then false. When the summary itself
+// cannot be read, the record is undefined: publish then carries forward the
+// one it finds when it writes the summary.
 async function countRound({ github, context, core }, pull, state) {
-  let record = null;
+  let record;
   try {
     record = storedRecord(await summaryComment(github, context, pull.number));
     const since = await roundsSince(github, context, pull);
@@ -126,14 +128,18 @@ async function askedSince(github, context, number, since) {
 }
 
 // Moves the PR to draft, which start() never reviews, and asks the author to
-// re-assess the approach. The PR is read again first: a push since this review
-// began is the newer head's to judge, and the author may have acted already.
+// re-assess the approach. The PR and its verdict are read again first: a push
+// since this review began is the newer head's to judge, and the author may
+// have acted already, by drafting, closing, or overriding.
 // The conversion takes GraphQL; a failure only warns, and the comment then
 // says the review goes on.
 async function handOff({ github, context, core }, record) {
   const sha = context.payload.pull_request.head.sha;
   const pull = await livePull(github, context);
   if (pull.head.sha !== sha || pull.state !== 'open' || pull.draft) return;
+  // An override accepted while this review published decided the head; a
+  // ready_for_review after a hand-off would review it again and replace it.
+  if ((await verdictStatus(github, context, sha))?.state !== 'failure') return;
   let drafted = false;
   try {
     await github.graphql(
@@ -157,4 +163,4 @@ async function handOff({ github, context, core }, record) {
 // failed, and it reaches the limit.
 const handsOff = (round, state) => round.counted && state === 'failure' && round.record.count >= roundLimit;
 
-module.exports = { roundLimit, countRound, nextRounds, roundsLine, handOff, handsOff };
+module.exports = { roundLimit, storedRecord, countRound, nextRounds, roundsLine, handOff, handsOff };

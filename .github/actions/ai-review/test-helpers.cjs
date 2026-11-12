@@ -191,7 +191,8 @@ const reposApi = (o, record) => ({
 function paginator(o, rest, calls) {
   const list = (call, items, failure) => (args) => {
     calls.push({ ...args, call });
-    if (failure) throw httpError(...failure);
+    const failed = typeof failure === 'function' ? failure() : failure;
+    if (failed) throw httpError(...failed);
     return items;
   };
   const lists = new Map([
@@ -206,7 +207,13 @@ function paginator(o, rest, calls) {
       list('listReviewComments', o.reviewComments, o.failReviewComments && ['Server Error', 500]),
     ],
   ]);
-  const comments = list('listComments', o.comments, o.failComments && ['Validation Failed', 422]);
+  // failComments: true fails every read, a number fails that many first reads.
+  const failComments = () => {
+    const fail = o.failComments === true || o.failComments > 0;
+    if (typeof o.failComments === 'number') o.failComments -= 1;
+    return fail && ['Validation Failed', 422];
+  };
+  const comments = list('listComments', o.comments, failComments);
   return endpoint((method, args) => (lists.get(method) ?? comments)(args));
 }
 

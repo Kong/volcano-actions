@@ -23,9 +23,12 @@ const recorded = (body) =>
   JSON.parse(Buffer.from(body.match(/\n<!-- ai-review-human ([A-Za-z0-9+/=]+) -->$/u)[1], 'base64').toString('utf8'))
     .rounds;
 
+// The verdict publish set, which the fake reads back as the head's status.
+const failed = [{ context: statusContext, state: 'failure', description: '1 P0-P2 finding(s).' }];
+
 async function publishRound(t, { json = failingJson, result = 'success', ...options }) {
   claudeReviews(t, result, json);
-  const c = client(options);
+  const c = client({ statuses: failed, ...options });
   const k = core();
   await publish({ github: c.github, context: context(), core: k });
   const written = [...c.named('createComment'), ...c.named('updateComment')];
@@ -211,4 +214,20 @@ test('an unreadable timeline keeps the recorded count and only warns', async (t)
     c.set(statusContext).map(([, state]) => state),
     ['failure'],
   );
+});
+
+test('an override accepted while the review published is not undone by a hand-off', async (t) => {
+  const overridden = [{ context: statusContext, state: 'success', description: 'Failing verdict overridden by lead.' }];
+  const { summaryBody, handOff, drafted } = await publishRound(t, { comments: [twoFailed], statuses: overridden });
+  assert.deepEqual(recorded(summaryBody), { since: opened, count: 3, sha });
+  assert.equal(handOff, undefined);
+  assert.deepEqual(drafted, []);
+});
+
+test('a failed read of the summary while counting keeps the count the summary holds', async (t) => {
+  const { k, summaryBody, handOff } = await publishRound(t, { comments: [twoFailed], failComments: 1 });
+  assert.match(k.warnings.join('\n'), /Could not count the AI review's rounds/u);
+  assert.deepEqual(recorded(summaryBody), { since: opened, count: 2, sha: otherHead });
+  assert.doesNotMatch(summaryBody, /round/iu);
+  assert.equal(handOff, undefined);
 });

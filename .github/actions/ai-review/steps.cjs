@@ -21,7 +21,7 @@ const { reviewersOf } = require('./reviews.cjs');
 const { postFindings } = require('./findings.cjs');
 const { start } = require('./start.cjs');
 const { keptSince, cutoff } = require('./deferral.cjs');
-const { countRound, roundsLine, handOff, handsOff } = require('./rounds.cjs');
+const { storedRecord, countRound, roundsLine, handOff, handsOff } = require('./rounds.cjs');
 
 // A closed PR's late verdict must not replace the one for another open PR on
 // the same head. Without one, it still publishes, so a reopen finds a verdict.
@@ -53,8 +53,10 @@ async function publishSummary({ github, context, core }, result, decision) {
   const pr = context.payload.pull_request;
   try {
     if (!(await isLiveHead(github, context))) return null;
-    const body = summaryBody(context, result, decision);
     const existing = await summaryComment(github, context, pr.number);
+    // A count that could not be read keeps the one the summary holds.
+    if (decision.rounds === undefined) decision.rounds = storedRecord(existing);
+    const body = summaryBody(context, result, decision);
     const { data } = existing
       ? await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body })
       : await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body });
