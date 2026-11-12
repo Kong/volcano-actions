@@ -11,9 +11,11 @@ const { clean, code } = require('./constants.cjs');
 // `deferred` names the problems the author deferred, by their keys (see
 // problems.cjs), and `since`, when GitHub recorded the summary that first
 // reported them, says only an approval of this commit given after then counts
-// (see deferral.cjs).
-const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null, deferred = [] }) =>
-  `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since, deferred })).toString('base64')} -->`;
+// (see deferral.cjs). `rounds` counts the failing rounds in a row since the PR
+// was last marked ready for review, reopened, or opened (see rounds.cjs); it
+// carries across heads.
+const decisionMarker = (sha, { reasons, reviewer, cleared = false, since = null, deferred = [], rounds = null }) =>
+  `<!-- ai-review-human ${Buffer.from(JSON.stringify({ sha, reasons, reviewer, cleared, since, deferred, rounds })).toString('base64')} -->`;
 
 // The person is asked to decide the reasons, not to repeat the review. When
 // the code is cleared (see publish), the comment says so.
@@ -44,11 +46,21 @@ function humanSection(sha, decision) {
 // it could contain a lookalike.
 const storedMarker = /\n<!-- ai-review-human ([A-Za-z0-9+/=]+) -->$/u;
 
-function storedDecision(comment, sha) {
+// The marker's record, whichever head it is for, or null when there is none.
+function storedMarkerOf(comment) {
   try {
     const encoded = comment.body.match(storedMarker)[1];
-    const decision = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
-    if (decision.sha === sha && Array.isArray(decision.reasons)) {
+    const stored = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+    return stored && typeof stored === 'object' ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+function storedDecision(comment, sha) {
+  try {
+    const decision = storedMarkerOf(comment);
+    if (decision?.sha === sha && Array.isArray(decision.reasons)) {
       const login = decision.reviewer?.login;
       return {
         reasons: decision.reasons.map(String),
@@ -61,4 +73,4 @@ function storedDecision(comment, sha) {
   return null;
 }
 
-module.exports = { decisionMarker, storedMarker, humanSection, storedDecision };
+module.exports = { decisionMarker, storedMarker, storedMarkerOf, humanSection, storedDecision };
