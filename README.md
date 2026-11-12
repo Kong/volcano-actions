@@ -80,8 +80,8 @@ single review that names no reviewer or provider, however many ran:
   When none completes, the verdict is an error and the head waits for a
   person, as described below.
 
-To add a provider, change only the workflow; the verdict reads any number of
-reviewers:
+To add a provider, change the workflow and the cost tables; the verdict reads
+any number of reviewers:
 
 1. Add a job to `ai-review.yml` like `claude` and `codex`. It requires its
    credential, refuses bots outside `allowed_bots` (start leaves bots to the
@@ -100,6 +100,9 @@ reviewers:
 4. Add the job to the provider list in
    `.github/actions/ai-review/reviewer-jobs.test.cjs`, whose tests hold every
    reviewer job to these rules.
+5. Add its `model` to `.github/actions/ai-review/prices.cjs`; a test fails
+   while any reviewer's model has no price. If its CLI writes a session log
+   unlike Claude Code's or Codex's, add a reader for it to `usage.cjs`.
 
 ### Human review
 

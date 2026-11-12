@@ -95,7 +95,7 @@ test('the export sends metrics and logs with the run and each reviewer', async (
   const sent = [];
   const fetchImpl = resolved((url, init) => {
     sent.push({ url, headers: init.headers, body: JSON.parse(init.body) });
-    return { ok: true };
+    return { ok: true, text: () => Promise.resolve('{}') };
   });
   const run = { repo: 'Kong/volcano-hosting', pr: 7, author: 'author', sha, runId: 9, attempt: 1, url: 'u' };
   const spend = runSpend(needs('success', 'cancelled'), usageDir(t), true);
@@ -127,7 +127,11 @@ test('the export sends metrics and logs with the run and each reviewer', async (
   for (const metric of metrics) {
     for (const point of metric.sum.dataPoints) assert.ok(!('github.pr.author' in attrs(point)), metric.name);
   }
-  assert.ok(logs.resource.attributes.some((a) => a.key === 'service.name' && a.value.stringValue === 'gha-ai-review'));
+  const resource = attrs(logs.resource);
+  assert.equal(resource['service.name'], 'gha-ai-review');
+  // Each run attempt is its own writer, so concurrent runs never share a stream.
+  assert.equal(resource['service.instance.id'], 'Kong/volcano-hosting/9/1');
+  assert.deepEqual(attrs(sent[0].body.resourceMetrics[0].resource), resource);
 });
 
 test('the cost step records the round and exports it, and a refused export only warns', async (t) => {
@@ -155,4 +159,14 @@ test('the cost step records nothing when no review ran', async (t) => {
   await cost({ github: c.github, context: context(), core: k, timing: noWait });
   assert.deepEqual(c.calls, []);
   assert.match(k.notices[0], /No AI review ran/u);
+});
+
+test('the export reports what an accepting collector rejected', async (t) => {
+  const answers = ['{"partialSuccess":{"rejectedDataPoints":"3","errorMessage":"bad delta"}}', '{"partialSuccess":{}}'];
+  const fetchImpl = resolved(() => ({ ok: true, text: () => Promise.resolve(answers.shift()) }));
+  const run = { repo: 'Kong/volcano-hosting', pr: 7, sha, runId: 9, attempt: 1, url: 'u' };
+  const spend = runSpend(needs('success'), usageDir(t), false);
+  assert.deepEqual(await exportSpend({ endpoint: 'https://otlp.example', headers: '', run, spend, fetchImpl }), [
+    'https://otlp.example/v1/metrics rejected 3 item(s): bad delta',
+  ]);
 });

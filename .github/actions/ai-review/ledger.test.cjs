@@ -138,3 +138,20 @@ test('a writer whose reads are always stale never writes and says it could not r
   );
   assert.deepEqual(c.calls, []);
 });
+
+test('ledger writes are never retried, so a late retry cannot land a stale copy', async () => {
+  const c = commentsClient();
+  const options = [];
+  const create = c.github.rest.issues.createComment;
+  c.github.rest.issues.createComment = (args) => {
+    options.push(args.request);
+    return create(args);
+  };
+  await recordRound(
+    { github: c.github, context: context() },
+    '9/1',
+    round('finished', 1, 1, '2026-11-11T10:00:00Z'),
+    noWait,
+  );
+  assert.deepEqual(options, [{ retries: 0 }]);
+});

@@ -123,6 +123,9 @@ const resource = (run) => ({
     // The `gha-` prefix names CI telemetry, which collectors' sampling rules can keep.
     'service.name': 'gha-ai-review',
     'service.namespace': run.repo,
+    // Each run attempt writes its own delta points. OpenTelemetry expects one
+    // writer per stream, and runs on different PRs overlap in time.
+    'service.instance.id': `${run.repo}/${run.runId}/${run.attempt}`,
     'deployment.environment.name': 'ci',
   }),
 });
@@ -136,18 +139,38 @@ async function post(fetchImpl, endpoint, signal, headers, body) {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw new Error(`${url} answered ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${url} answered ${response.status}: ${text.slice(0, 200)}`);
+  return rejection(url, text);
 }
 
-// Sends the metrics and logs. Throws when the collector refuses either.
+// A collector can accept a request and still reject part of it, which OTLP
+// reports as `partialSuccess` in a successful response. Returns that as a
+// message, or null when everything was accepted.
+function rejection(url, text) {
+  let partial;
+  try {
+    partial = JSON.parse(text || '{}').partialSuccess;
+  } catch {
+    return null;
+  }
+  const rejected = Number(partial?.rejectedDataPoints ?? partial?.rejectedLogRecords ?? 0);
+  if (!(rejected > 0) && !partial?.errorMessage) return null;
+  return `${url} rejected ${rejected} item(s): ${String(partial.errorMessage ?? '').slice(0, 200)}`;
+}
+
+// Sends the metrics and logs. Throws when the collector refuses either, and
+// returns what it rejected from requests it accepted; a partly accepted
+// request is not sent again, which would repeat the accepted part.
 async function exportSpend({ endpoint, headers, run, spend, now = Date.now(), fetchImpl = fetch }) {
   const parsed = parseHeaders(headers);
-  await post(fetchImpl, endpoint, 'metrics', parsed, {
+  const metrics = await post(fetchImpl, endpoint, 'metrics', parsed, {
     resourceMetrics: [{ resource: resource(run), scopeMetrics: [{ scope, metrics: metricsOf(run, spend, now) }] }],
   });
-  await post(fetchImpl, endpoint, 'logs', parsed, {
+  const logs = await post(fetchImpl, endpoint, 'logs', parsed, {
     resourceLogs: [{ resource: resource(run), scopeLogs: [{ scope, logRecords: logsOf(run, spend, now) }] }],
   });
+  return [metrics, logs].filter(Boolean);
 }
 
 module.exports = { exportSpend, parseHeaders };

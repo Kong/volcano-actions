@@ -157,17 +157,23 @@ const pause = (ms) =>
     setTimeout(resolve, ms);
   });
 
+// The action's client retries failed requests, and a retried write would land
+// a copy of the ledger long after it was read. Ledger writes are never
+// retried; the next round of `recordRound` reads again instead.
+const once = { request: { retries: 0 } };
+
 // Writes the ledger to the first cost comment, creating it if there is none,
 // and deletes any other, folding them into it.
 async function writeLedger(github, context, comments, ledger) {
   const body = costBody(ledger);
   const [first, ...rest] = comments;
-  if (first) await github.rest.issues.updateComment({ ...context.repo, comment_id: first.id, body });
+  if (first) await github.rest.issues.updateComment({ ...context.repo, comment_id: first.id, body, ...once });
   else {
     await github.rest.issues.createComment({
       ...context.repo,
       issue_number: context.payload.pull_request.number,
       body,
+      ...once,
     });
   }
   for (const extra of rest) await github.rest.issues.deleteComment({ ...context.repo, comment_id: extra.id });
@@ -176,16 +182,17 @@ async function writeLedger(github, context, comments, ledger) {
 // A writer that read the ledger longer ago than this reads it again rather
 // than write a copy that may be stale.
 const staleAfter = 3000;
-// How long a writer waits before checking its round survived. It exceeds
-// `staleAfter` plus a write's latency, so any write made from a read that
-// predates this writer's has landed by then.
-const settle = 10_000;
+// How long a writer waits before checking its round survived. GitHub stops
+// processing an API request after 10 seconds, and ledger writes are never
+// retried, so a write lands within `staleAfter` plus 10 seconds of its read.
+// Any write from a read older than this writer's write has landed by then.
+const settle = 20_000;
 
 // Adds this run's round to the PR's cost comment. GitHub cannot update a
 // comment only if it is unchanged, so two runs can write at once, as when a
 // push cancels a review while another run records, and the later write can
 // drop the earlier one's round. Every writer writes only from a fresh read,
-// waits until any write from an older read has landed, and reads again,
+// once, waits until any write from an older read has landed, and reads again,
 // writing again until its round is there. A round already recorded, as by a
 // re-run of this step, is left as it is.
 async function recordRound({ github, context }, key, round, timing = {}) {
