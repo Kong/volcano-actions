@@ -15,6 +15,11 @@
 # person. A run that reviews nothing, because start skipped the head or
 # failed, publishes no verdict.
 #
+# After three failing rounds in a row since the PR was last marked ready for
+# review, the verdict job moves the PR back to draft, which start skips, and
+# asks the author and any coding agent working for them to re-assess the
+# approach. Marking the PR ready again starts a new set of rounds.
+#
 # To add a provider, add a job like `claude` and `codex`, list it in
 # `verdict.needs`, and add its credential secret to workflow_call.
 #
@@ -123,7 +128,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
+        uses: Kong/volcano-actions/.github/actions/ai-review@70b10a60035fa26da030810c33f0a8e47a4b0ab0
         with:
           step: start
 
@@ -170,7 +175,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
+        uses: Kong/volcano-actions/.github/actions/ai-review@70b10a60035fa26da030810c33f0a8e47a4b0ab0
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -289,7 +294,7 @@ jobs:
           persist-credentials: true
       # Writes the same inputs as the claude job, before the credentials go.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
+        uses: Kong/volcano-actions/.github/actions/ai-review@70b10a60035fa26da030810c33f0a8e47a4b0ab0
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -401,7 +406,7 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
+      - uses: Kong/volcano-actions/.github/actions/ai-review@70b10a60035fa26da030810c33f0a8e47a4b0ab0
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
@@ -421,6 +426,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@2d16c3400d1d202444c03e12745faf030616eea3
+      - uses: Kong/volcano-actions/.github/actions/ai-review@70b10a60035fa26da030810c33f0a8e47a4b0ab0
         with:
           step: override
