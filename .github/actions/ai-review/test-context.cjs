@@ -61,6 +61,7 @@ function core() {
     outputs,
     setFailed: (message) => failures.push(message),
     notice: (message) => notices.push(message),
+    info: () => {},
     warning: (message) => warnings.push(message),
     setOutput: (name, value) => {
       outputs[name] = value;
