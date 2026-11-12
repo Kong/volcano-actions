@@ -97,7 +97,7 @@ test('the export sends metrics and logs with the run and each reviewer', async (
     sent.push({ url, headers: init.headers, body: JSON.parse(init.body) });
     return { ok: true };
   });
-  const run = { repo: 'Kong/volcano-hosting', pr: 7, sha, runId: 9, attempt: 1, url: 'u' };
+  const run = { repo: 'Kong/volcano-hosting', pr: 7, author: 'author', sha, runId: 9, attempt: 1, url: 'u' };
   const spend = runSpend(needs('success', 'cancelled'), usageDir(t), true);
   await exportSpend({ endpoint: 'https://otlp.example/', headers: 'Authorization=Bearer t', run, spend, fetchImpl });
   assert.deepEqual(
@@ -122,6 +122,11 @@ test('the export sends metrics and logs with the run and each reviewer', async (
   assert.equal(attrs(costPoints[0])['vcs.change.id'], '7');
   const logs = sent[1].body.resourceLogs[0];
   assert.equal(logs.scopeLogs[0].logRecords.length, 2);
+  for (const record of logs.scopeLogs[0].logRecords) assert.equal(attrs(record)['github.pr.author'], 'author');
+  // Metrics carry no author, so their series stay few.
+  for (const metric of metrics) {
+    for (const point of metric.sum.dataPoints) assert.ok(!('github.pr.author' in attrs(point)), metric.name);
+  }
   assert.ok(logs.resource.attributes.some((a) => a.key === 'service.name' && a.value.stringValue === 'gha-ai-review'));
 });
 

@@ -101,6 +101,8 @@ function logsOf(run, spend, now) {
     attributes: attributes({
       ...labels(run, r),
       'vcs.change.id': run.pr,
+      // Logs only: one value per contributor would grow every metric series.
+      'github.pr.author': run.author,
       'vcs.ref.head.revision': run.sha,
       'cicd.pipeline.run.id': run.runId,
       'cicd.pipeline.run.attempt': run.attempt,

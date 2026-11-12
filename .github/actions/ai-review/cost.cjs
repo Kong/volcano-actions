@@ -54,6 +54,7 @@ async function cost({ github, context, core, timing }) {
   const run = {
     repo: `${context.repo.owner}/${context.repo.repo}`,
     pr: pr.number,
+    author: pr.user?.login,
     sha: pr.head.sha,
     runId: context.runId,
     attempt: context.runAttempt,
