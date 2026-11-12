@@ -59,15 +59,22 @@ test('a third failing round moves the PR to draft and asks a person to re-assess
     comments: [summary({ since: opened, count: 2, sha: otherHead })],
   });
   assert.deepEqual(recorded(summaryBody), { since: opened, count: 3, sha });
-  assert.match(summaryBody, /Round 3 of 3 .*, so a person re-assesses the PR/u);
+  assert.match(summaryBody, /Round 3 of 3 .*, so the author re-assesses the approach/u);
   assert.deepEqual(
     drafted.map((d) => d.id),
     ['PR_7'],
   );
   assert.match(drafted[0].query, /convertPullRequestToDraft/u);
-  assert.match(handOff.body, /^<!-- ai-review-rounds -->\n### AI review: 3 rounds without converging\n/u);
-  assert.match(handOff.body, /at abcdef1 after 3 rounds .*, so it moved the PR back to draft and will not review/u);
-  assert.match(handOff.body, /Mark the PR ready for review to start a new set of 3 rounds\./u);
+  assert.match(handOff.body, /^<!-- ai-review-rounds -->\n### AI review: re-assess the approach\n\n@author, /u);
+  assert.match(handOff.body, /at abcdef1 after 3 rounds .*moved this PR back to draft and will not review more/u);
+  for (const option of ['Split it', 'Simplify the design', 'Rethink the approach', 'Push back']) {
+    assert.ok(handOff.body.includes(`- **${option}**`), option);
+  }
+  assert.match(
+    handOff.body,
+    /\*\*Coding agents:\*\* stop here and do not push another fix .* wait for the author's decision before changing the code or marking the PR ready for review\./u,
+  );
+  assert.match(handOff.body, /Marking the PR ready for review starts a new set of 3 rounds\.$/u);
   assert.equal(handOff.issue_number, 7);
   assert.deepEqual(
     c.set(statusContext).map(([, state]) => state),
@@ -146,7 +153,19 @@ test('a failed draft conversion only warns, and the comment still asks for a per
   });
   assert.deepEqual(k.failures, []);
   assert.match(k.warnings.join('\n'), /Could not move the PR back to draft after 3 rounds/u);
-  assert.match(handOff.body, /after 3 rounds .*, so it will not review more pushes until a person re-assesses it/u);
+  assert.match(handOff.body, /so the AI review will not review more pushes .* convert it yourself while you decide\./u);
+});
+
+test('the hand-off names a human author, and never mentions a bot', async (t) => {
+  const stored = { since: opened, count: 2, sha: otherHead };
+  for (const [user, ask] of [
+    [{ login: 'octo-dev', type: 'User' }, /\n@octo-dev, the AI review/u],
+    [{ login: 'kong-volcano-app[bot]', type: 'Bot' }, /\nPR author, the AI review/u],
+  ]) {
+    const { handOff } = await publishRound(t, { comments: [summary(stored)], author: user });
+    assert.match(handOff.body, ask);
+    assert.doesNotMatch(handOff.body, /@kong-volcano-app/u);
+  }
 });
 
 test('an unreadable timeline leaves the PR to the reviews and only warns', async (t) => {

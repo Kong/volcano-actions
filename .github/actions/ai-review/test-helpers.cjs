@@ -112,6 +112,7 @@ const clientDefaults = () => ({
   timeline: [],
   failTimeline: false,
   failDraft: false,
+  author: { login: 'author', type: 'User' },
 });
 
 // Makes endpoints that record each call by name before answering.
@@ -141,7 +142,7 @@ const livePull = (o, number) => ({
   draft: o.draft,
   state: o.state,
   labels: o.labels,
-  user: { login: 'author' },
+  user: o.author,
   requested_reviewers: o.requested,
   requested_teams: o.requestedTeams,
   head: {

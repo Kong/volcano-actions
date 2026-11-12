@@ -59,24 +59,39 @@ async function countRound({ github, context, core }, pull, completed) {
 function roundsLine({ count }) {
   const round = `Round ${count} of ${roundLimit} since this PR was last marked ready for review`;
   return count >= roundLimit
-    ? `${round}, so a person re-assesses the PR before the AI review reviews more pushes.`
-    : `${round}. If round ${roundLimit} still finds P0-P2 problems, the AI review moves the PR back to draft for a person to re-assess.`;
+    ? `${round}, so the author re-assesses the approach before the AI review reviews more pushes.`
+    : `${round}. If round ${roundLimit} still finds P0-P2 problems, the AI review moves the PR back to draft for the author to re-assess the approach.`;
 }
 
-const handOffBody = (short, drafted) =>
+// Whom the hand-off asks: the author by name, so GitHub notifies them, unless
+// a bot opened the PR, which a mention would not reach.
+const authorOf = (pull) =>
+  pull.user?.type === 'User' && /^[A-Za-z0-9-]+$/u.test(pull.user.login) ? `@${pull.user.login}` : 'PR author';
+
+// The hand-off speaks to the author, and to a coding agent working for them,
+// which reads PR comments: when fixes keep producing findings, the approach is
+// usually the problem, and the agent must hand that call back to the author
+// rather than push another fix.
+const handOffBody = (short, drafted, author) =>
   [
     roundsMarker,
-    `### AI review: ${roundLimit} rounds without converging`,
+    '### AI review: re-assess the approach',
     '',
-    `The AI review still finds P0-P2 problems at ${short} after ${roundLimit} rounds since this PR was last marked ready for review, so ${drafted ? 'it moved the PR back to draft and' : 'it'} will not review more pushes until a person re-assesses it.`,
+    `${author}, the AI review still finds P0-P2 problems at ${short} after ${roundLimit} rounds since this PR was last marked ready for review. When each fix brings new findings, the approach is usually the problem rather than the next fix, so ${drafted ? 'the AI review moved this PR back to draft and' : 'the AI review'} will not review more pushes until you decide how to go on.${drafted ? '' : ' It could not move the PR back to draft, so convert it yourself while you decide.'}`,
     '',
-    'Decide whether the findings stand, and whether to keep fixing, redesign, or split the PR. Reply on a finding the code should keep, with a reason or the follow-up work it waits for, and the next round reads it.',
+    'Consider:',
+    '- **Split it** into smaller PRs that each review cleanly.',
+    '- **Simplify the design**, so there is less that can go wrong.',
+    '- **Rethink the approach** where the findings keep landing in the same place.',
+    '- **Push back** on findings you think are wrong: reply on each with a reason, or the follow-up work it waits for, and the next round reads it.',
     '',
-    `Mark the PR ready for review to start a new set of ${roundLimit} rounds.`,
+    `**Coding agents:** stop here and do not push another fix for these findings. Tell the author this PR did not converge after ${roundLimit} AI review rounds, summarize the open findings and where they cluster, recommend one of the options above, and wait for the author's decision before changing the code or marking the PR ready for review.`,
+    '',
+    `Marking the PR ready for review starts a new set of ${roundLimit} rounds.`,
   ].join('\n');
 
-// Moves the PR to draft, which start() never reviews, and asks a person to
-// re-assess it. The conversion takes GraphQL; a failure only warns, and the
+// Moves the PR to draft, which start() never reviews, and asks the author to
+// re-assess the approach. The conversion takes GraphQL; a failure only warns, and the
 // comment then still asks.
 async function handOff({ github, context, core }, pull) {
   const short = context.payload.pull_request.head.sha.slice(0, 7);
@@ -94,14 +109,14 @@ async function handOff({ github, context, core }, pull) {
     await github.rest.issues.createComment({
       ...context.repo,
       issue_number: pull.number,
-      body: handOffBody(short, drafted),
+      body: handOffBody(short, drafted, authorOf(pull)),
     });
   } catch (error) {
-    core.warning(`Could not ask for a person to re-assess the PR after ${roundLimit} rounds: ${error.message}`);
+    core.warning(`Could not ask the author to re-assess the PR after ${roundLimit} rounds: ${error.message}`);
   }
 }
 
-// Whether this round hands the PR to a person: it failed, it is at least the
+// Whether this round hands the PR back to its author: it failed, it is at least the
 // last round, and the PR is still open and ready for review.
 const handsOff = (rounds, state, pull) =>
   rounds !== null && state === 'failure' && rounds.count >= roundLimit && pull.state === 'open' && !pull.draft;
