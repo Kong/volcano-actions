@@ -231,3 +231,37 @@ test('a failed read of the summary while counting keeps the count the summary ho
   assert.doesNotMatch(summaryBody, /round/iu);
   assert.equal(handOff, undefined);
 });
+
+test('a draft conversion that succeeds after a failed one says so, once', async (t) => {
+  const stillReviewing = {
+    id: 3,
+    user: { login: 'github-actions[bot]' },
+    body: '<!-- ai-review-rounds -->\n### AI review: re-assess the approach\n\nbut the AI review could not move this PR back to draft, so it keeps reviewing each push.',
+    created_at: '2026-10-24T12:00:00Z',
+  };
+  const fourFailed = summary({ since: opened, count: 3, sha: otherHead });
+  const now = await publishRound(t, { comments: [fourFailed, stillReviewing] });
+  assert.equal(now.drafted.length, 1);
+  assert.match(now.handOff.body, /so the AI review moved this PR back to draft, where it reviews no pushes/u);
+
+  const said = { ...stillReviewing, id: 4, body: now.handOff.body };
+  const again = await publishRound(t, { comments: [fourFailed, stillReviewing, said] });
+  assert.equal(again.handOff, undefined);
+});
+
+test('a failed read of the PR before the hand-off only warns', async (t) => {
+  let reads = 0;
+  const { k, summaryBody, handOff, drafted } = await publishRound(t, {
+    comments: [twoFailed],
+    liveHead: () => {
+      reads += 1;
+      if (reads > 3) throw Object.assign(new Error('Server Error'), { status: 502 });
+      return sha;
+    },
+  });
+  assert.deepEqual(k.failures, []);
+  assert.match(k.warnings.join('\n'), /Could not read the PR before handing it back to its author: Server Error/u);
+  assert.deepEqual(recorded(summaryBody), { since: opened, count: 3, sha });
+  assert.equal(handOff, undefined);
+  assert.deepEqual(drafted, []);
+});
