@@ -16,6 +16,7 @@ function context({
   draft = false,
   eventName = 'pull_request_target',
   workflowRun,
+  privateRepo = true,
 } = {}) {
   if (workflowRun) {
     return {
@@ -38,6 +39,7 @@ function context({
     payload: {
       action,
       sender,
+      repository: { private: privateRepo },
       pull_request: {
         number: 7,
         draft,
@@ -61,6 +63,7 @@ function core() {
     outputs,
     setFailed: (message) => failures.push(message),
     notice: (message) => notices.push(message),
+    info: () => {},
     warning: (message) => warnings.push(message),
     setOutput: (name, value) => {
       outputs[name] = value;

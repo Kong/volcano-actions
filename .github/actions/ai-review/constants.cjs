@@ -13,6 +13,8 @@ const marker = '<!-- ai-review-verdict -->';
 // Starts the comment that hands a PR to a person after the round limit (see
 // rounds.cjs).
 const roundsMarker = '<!-- ai-review-rounds -->';
+// Starts the comment that keeps the PR's running review cost.
+const costMarker = '<!-- ai-review-cost -->';
 // Severity levels, most severe first: Codex review's P0-P3 priorities, plus
 // pre-existing problems the PR did not cause.
 const severities = { p0: '🔴 P0', p1: '🟠 P1', p2: '🟡 P2', p3: '⚪ P3', pre_existing: '🟣 Pre-existing' };
@@ -45,6 +47,7 @@ module.exports = {
   humanLabel,
   marker,
   roundsMarker,
+  costMarker,
   severities,
   failing,
   runUrl,

@@ -16,7 +16,8 @@ in one verdict. The policy and output schema ship with the action
 step; a provider's job adds only how that provider reads and returns its
 verdict, and the verdict job posts every reviewer's comments. The verdict code reads any number of reviewers from the
 `verdict` job's `needs`, so adding a provider changes only the workflow, its
-secrets, and the reviewer-job tests. `README.md` lists the steps. Name a
+secrets, the reviewer-job tests, and its model's price in `prices.cjs` (plus a
+session-log reader in `usage.cjs` if its CLI writes a new format). `README.md` lists the steps. Name a
 provider in user-facing text only when the text is about that one reviewer;
 otherwise call it the AI review.
 

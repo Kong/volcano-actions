@@ -1,0 +1,251 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const { cost } = require('./cost.cjs');
+const { runSpend } = require('./spend.cjs');
+const { ledgerOf, costBody, roundOf } = require('./ledger.cjs');
+const { exportSpend, parseHeaders } = require('./otlp.cjs');
+const { tempDir } = require('./test-git.cjs');
+const { sha, clearAfter, context, core } = require('./test-helpers.cjs');
+const {
+  tokens,
+  claudeUsage,
+  codexUsage,
+  needs,
+  usageDir,
+  resolved,
+  commentsClient,
+  noWait,
+} = require('./test-cost.cjs');
+
+test('spend prices each reviewer and says how its run ended', (t) => {
+  const dir = usageDir(t);
+  const [claude, codex] = runSpend(needs('success'), dir, false);
+  // 1M input at $4, 100k output at $20, 2M cache reads at $0.20.
+  assert.equal(claude.cost.toFixed(2), '6.40');
+  assert.deepEqual(
+    [claude.state, claude.reason, claude.partial, claude.basis],
+    ['finished', 'completed', false, 'api'],
+  );
+  assert.equal(codex.cost.toFixed(2), '3.00');
+  assert.equal(codex.basis, 'list_price_equivalent');
+
+  const [cancelled] = runSpend(needs('cancelled'), dir, true);
+  assert.deepEqual([cancelled.state, cancelled.reason, cancelled.partial], ['cancelled', 'superseded', true]);
+  assert.equal(runSpend(needs('cancelled'), dir, false)[0].reason, 'other');
+  assert.equal(runSpend(needs('failure'), dir, false)[0].reason, 'failed');
+});
+
+test('spend skips skipped reviewers and jobs that are not reviewers, and flags missing usage', (t) => {
+  const dir = usageDir(t, { codex: codexUsage });
+  const spend = runSpend(needs('cancelled', 'skipped', { verdict: { result: 'skipped', outputs: {} } }), dir, true);
+  assert.deepEqual(
+    spend.map((r) => [r.reviewer, r.recorded, r.cost]),
+    [['Claude', false, 0]],
+  );
+  assert.deepEqual(
+    runSpend(needs('skipped'), dir, false).map((r) => r.reviewer),
+    [],
+  );
+});
+
+test('an unknown cost shows as ? and makes the totals a lower bound', (t) => {
+  const unpriced = { provider: 'claude', attempt: 1, models: { 'claude-next': { calls: 1, tokens: tokens(10, 10) } } };
+  const spend = runSpend(needs('success'), usageDir(t, { claude: unpriced }), false);
+  assert.deepEqual(
+    spend.map((r) => [r.reviewer, r.known, r.partial]),
+    [
+      ['Claude', false, false],
+      ['Codex', false, false],
+    ],
+  );
+  const ledger = ledgerOf(null);
+  ledger.rounds['9/1'] = roundOf(sha, spend, '2026-11-11T10:00:00Z');
+  const body = costBody(ledger);
+  assert.match(body, /\*\*AI review cost:\*\* ~\$0\.00 over 1 round/u);
+  assert.match(body, /\| `abcdef1` \| finished \| \? \| \? \| ~\$0\.00 \|/u);
+});
+
+test('a reviewer whose log recorded no call is reported as recording no usage, not as unpriced', async (t) => {
+  const empty = { provider: 'codex', attempt: 1, models: {} };
+  Object.assign(process.env, {
+    REVIEWS: needs('success', 'cancelled'),
+    USAGE_OUTPUTS: usageDir(t, { claude: claudeUsage, codex: empty }),
+  });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS');
+  const k = core();
+  await cost({ github: commentsClient().github, context: context(), core: k, timing: noWait });
+  assert.deepEqual(k.warnings, ['The Codex review recorded no usage, so its cost is unknown.']);
+  const [codex] = runSpend(process.env.REVIEWS, process.env.USAGE_OUTPUTS, false).filter((r) => r.job === 'codex');
+  assert.deepEqual([codex.recorded, codex.priced, codex.known], [false, true, false]);
+});
+
+test('a re-run records only the reviewers it ran, not those carried over from an earlier attempt', (t) => {
+  const dir = usageDir(t, { claude: claudeUsage, codex: { ...codexUsage, attempt: 2 } });
+  assert.deepEqual(
+    runSpend(needs('success'), dir, false, 2).map((r) => r.reviewer),
+    ['Codex'],
+  );
+  // Re-running only the verdict or cost job records nothing again.
+  assert.deepEqual(runSpend(needs('success'), usageDir(t), false, 2), []);
+  // Without a usage file, only a first attempt can tell the reviewer ran.
+  assert.deepEqual(
+    runSpend(needs('cancelled'), tempDir(t, 'usage-'), true, 1).map((r) => r.reviewer),
+    ['Claude', 'Codex'],
+  );
+  assert.deepEqual(runSpend(needs('cancelled'), tempDir(t, 'usage-'), true, 2), []);
+});
+
+test('OTLP headers parse as OpenTelemetry writes them', () => {
+  assert.deepEqual(parseHeaders('Authorization=Bearer abc=,Dash0-Dataset=volcano, x = a%20b ,bad'), {
+    Authorization: 'Bearer abc=',
+    'Dash0-Dataset': 'volcano',
+    x: 'a b',
+  });
+});
+
+test('the export sends metrics and logs with the run and each reviewer', async (t) => {
+  const sent = [];
+  const fetchImpl = resolved((url, init) => {
+    sent.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return { ok: true, text: () => Promise.resolve('{}') };
+  });
+  const run = { repo: 'Kong/volcano-hosting', pr: 7, author: 'author', sha, runId: 9, attempt: 1, url: 'u' };
+  const spend = runSpend(needs('success', 'cancelled'), usageDir(t), true);
+  await exportSpend({ endpoint: 'https://otlp.example/', headers: 'Authorization=Bearer t', run, spend, fetchImpl });
+  assert.deepEqual(
+    sent.map((s) => s.url),
+    ['https://otlp.example/v1/metrics', 'https://otlp.example/v1/logs'],
+  );
+  assert.equal(sent[0].headers.Authorization, 'Bearer t');
+  const metrics = sent[0].body.resourceMetrics[0].scopeMetrics[0].metrics;
+  assert.deepEqual(
+    metrics.map((m) => m.name),
+    ['ai_review.tokens', 'ai_review.cost', 'ai_review.reviews', 'ai_review.unmeasured_calls'],
+  );
+  const costPoints = metrics[1].sum.dataPoints;
+  const attrs = (p) => Object.fromEntries(p.attributes.map((a) => [a.key, Object.values(a.value)[0]]));
+  assert.deepEqual(
+    costPoints.map((p) => [attrs(p)['ai_review.reviewer'], attrs(p)['ai_review.run.state'], p.asDouble.toFixed(2)]),
+    [
+      ['Claude', 'finished', '6.40'],
+      ['Codex', 'cancelled', '3.00'],
+    ],
+  );
+  assert.equal(attrs(costPoints[0])['vcs.change.id'], '7');
+  const logs = sent[1].body.resourceLogs[0];
+  assert.equal(logs.scopeLogs[0].logRecords.length, 2);
+  for (const record of logs.scopeLogs[0].logRecords) {
+    assert.equal(attrs(record)['github.pr.author'], 'author');
+    assert.equal(attrs(record)['vcs.ref.head.revision'], sha);
+  }
+  // Codex's whole-dollar cost is a double like Claude's, so the attribute keeps one type.
+  assert.deepEqual(
+    logs.scopeLogs[0].logRecords.map((r) => r.attributes.find((a) => a.key === 'ai_review.cost.usd').value),
+    [{ doubleValue: 6.4 }, { doubleValue: 3 }],
+  );
+  // Metrics carry no author or head, so their series stay few.
+  const points = metrics.flatMap((metric) => metric.sum.dataPoints.map(attrs));
+  assert.ok(points.every((a) => !('github.pr.author' in a) && !('vcs.ref.head.revision' in a)));
+  const resource = attrs(logs.resource);
+  assert.equal(resource['service.name'], 'gha-ai-review');
+  // Each run attempt is its own writer, so concurrent runs never share a stream.
+  assert.equal(resource['service.instance.id'], 'Kong/volcano-hosting/9/1');
+  assert.deepEqual(attrs(sent[0].body.resourceMetrics[0].resource), resource);
+});
+
+test('the cost step records the round and exports it, and a refused export only warns', async (t) => {
+  const dir = usageDir(t);
+  Object.assign(process.env, { REVIEWS: needs('cancelled'), USAGE_OUTPUTS: dir, OTLP_ENDPOINT: 'http://127.0.0.1:9' });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS', 'OTLP_ENDPOINT');
+  const c = commentsClient();
+  const k = core();
+  // Port 9 refuses the connection.
+  await cost({ github: c.github, context: context(), core: k, timing: noWait });
+  const [comment] = c.comments();
+  const ledger = ledgerOf(comment);
+  // The live head moved past the reviewed one, so the cancel was a push.
+  assert.equal(ledger.rounds['9/1'].state, 'cancelled');
+  assert.match(comment.body, /- Cancelled: ~\$9\.40 \(1 round\)/u);
+  assert.equal(k.failures.length, 0);
+  assert.match(k.warnings.at(-1), /Could not export the AI review cost/u);
+});
+
+test('the cost step exports without waiting for the ledger write to settle', async (t) => {
+  Object.assign(process.env, {
+    REVIEWS: needs('success'),
+    USAGE_OUTPUTS: usageDir(t),
+    OTLP_ENDPOINT: 'https://otlp.example',
+  });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS', 'OTLP_ENDPOINT');
+  const posted = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    resolved((url) => {
+      posted.push(url);
+      return { ok: true, text: () => Promise.resolve('{}') };
+    }),
+  );
+  const c = commentsClient();
+  const k = core();
+  // A cancel during the ledger's settle wait must not lose the export.
+  let postedBeforeSettle = null;
+  const wait = () => {
+    postedBeforeSettle ??= [...posted];
+    return Promise.resolve();
+  };
+  await cost({ github: c.github, context: context(), core: k, timing: { ...noWait, wait } });
+  assert.ok(postedBeforeSettle.includes('https://otlp.example/v1/metrics'), 'the export waited for the ledger');
+  assert.deepEqual(posted, ['https://otlp.example/v1/metrics', 'https://otlp.example/v1/logs']);
+  assert.equal(ledgerOf(c.comments()[0]).rounds['9/1'].state, 'finished');
+  assert.deepEqual(k.warnings, []);
+});
+
+test('the cost step shows no dollar figures on a public repository but still exports', async (t) => {
+  Object.assign(process.env, {
+    REVIEWS: needs('success'),
+    USAGE_OUTPUTS: usageDir(t),
+    OTLP_ENDPOINT: 'https://otlp.example',
+  });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS', 'OTLP_ENDPOINT');
+  const posted = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    resolved((url) => {
+      posted.push(url);
+      return { ok: true, text: () => Promise.resolve('{}') };
+    }),
+  );
+  const c = commentsClient();
+  const k = { ...core(), infos: [] };
+  k.info = (message) => k.infos.push(message);
+  await cost({ github: c.github, context: context({ privateRepo: false }), core: k, timing: noWait });
+  assert.deepEqual(c.calls, []);
+  assert.deepEqual(c.comments(), []);
+  assert.deepEqual(posted, ['https://otlp.example/v1/metrics', 'https://otlp.example/v1/logs']);
+  assert.ok(k.infos.length > 0);
+  assert.ok(!k.infos.some((line) => line.includes('$')), 'the log shows a dollar figure');
+});
+
+test('the cost step records nothing when no review ran', async (t) => {
+  Object.assign(process.env, { REVIEWS: needs('skipped'), USAGE_OUTPUTS: tempDir(t, 'usage-') });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS');
+  const c = commentsClient();
+  const k = core();
+  await cost({ github: c.github, context: context(), core: k, timing: noWait });
+  assert.deepEqual(c.calls, []);
+  assert.match(k.notices[0], /No AI review ran/u);
+});
+
+test('the export reports what an accepting collector rejected', async (t) => {
+  const answers = ['{"partialSuccess":{"rejectedDataPoints":"3","errorMessage":"bad delta"}}', '{"partialSuccess":{}}'];
+  const fetchImpl = resolved(() => ({ ok: true, text: () => Promise.resolve(answers.shift()) }));
+  const run = { repo: 'Kong/volcano-hosting', pr: 7, sha, runId: 9, attempt: 1, url: 'u' };
+  const spend = runSpend(needs('success'), usageDir(t), false);
+  assert.deepEqual(await exportSpend({ endpoint: 'https://otlp.example', headers: '', run, spend, fetchImpl }), [
+    'https://otlp.example/v1/metrics rejected 3 item(s): bad delta',
+  ]);
+});

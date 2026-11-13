@@ -25,7 +25,7 @@ test('the action runs only the exported steps and passes inputs through env', ()
   const script = text.split('script: |\n')[1];
   assert.doesNotMatch(script, /\$\{\{/u);
   const allowed = JSON.parse(script.match(/\[('prepare'.*?)\]/u)[0].replaceAll("'", '"'));
-  assert.deepEqual(allowed, ['prepare', 'start', 'publish', 'override', 'gate']);
+  assert.deepEqual(allowed, ['prepare', 'start', 'publish', 'override', 'gate', 'usage', 'cost']);
   for (const step of allowed) assert.equal(typeof review[step], 'function', step);
   const inputs = text.split('\ninputs:\n')[1].split('\noutputs:\n')[0];
   const names = [...inputs.matchAll(/^ {2}([a-z-]+):\n/gmu)].map((match) => match[1]);
