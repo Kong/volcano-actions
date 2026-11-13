@@ -151,14 +151,25 @@ async function stillFailing({ github, context, core }, sha) {
   }
 }
 
+// GitHub refuses convertPullRequestToDraft to a GITHUB_TOKEN without
+// contents: write, even with pull-requests: write. The verdict job's token has
+// contents: read, so a caller that grants contents: write to a separate
+// handoff job (see README.md) is the one whose PRs move to draft.
+const draftPermission =
+  'Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the handoff step in its own job with them (see README.md).';
+const forbidden = (error) =>
+  (Array.isArray(error.errors) && error.errors.some((e) => e?.type === 'FORBIDDEN')) ||
+  /Resource not accessible by integration/u.test(error.message ?? '');
+
 // Moves the PR to draft, which start() never reviews, and asks the author to
 // re-assess the approach, once the PR and its verdict are read again. The
 // conversion takes GraphQL; a failure only warns, and the comment then says
-// the review goes on.
+// the review goes on. Returns whether the PR moved to draft, or null when it
+// was not handed off.
 async function handOff({ github, context, core }, record) {
   const sha = context.payload.pull_request.head.sha;
   const pull = await stillFailing({ github, context, core }, sha);
-  if (!pull) return;
+  if (!pull) return null;
   let drafted = false;
   try {
     await github.graphql(
@@ -167,14 +178,35 @@ async function handOff({ github, context, core }, record) {
     );
     drafted = true;
   } catch (error) {
-    core.warning(`Could not move the PR back to draft after ${record.count} failing rounds: ${error.message}`);
+    const why = forbidden(error) ? ` ${draftPermission}` : '';
+    core.warning(`Could not move the PR back to draft after ${record.count} failing rounds: ${error.message}${why}`);
   }
   try {
-    if (await alreadyAsked(github, context, pull.number, record.since, drafted)) return;
-    const body = handOffBody({ short: sha.slice(0, 7), count: record.count, drafted, author: authorOf(pull) });
-    await github.rest.issues.createComment({ ...context.repo, issue_number: pull.number, body });
+    if (!(await alreadyAsked(github, context, pull.number, record.since, drafted))) {
+      const body = handOffBody({ short: sha.slice(0, 7), count: record.count, drafted, author: authorOf(pull) });
+      await github.rest.issues.createComment({ ...context.repo, issue_number: pull.number, body });
+    }
   } catch (error) {
     core.warning(`Could not ask the author to re-assess the PR: ${error.message}`);
+  }
+  return drafted;
+}
+
+// The handoff step: hands the PR back to its author in a job of its own, whose
+// token can convert it to draft, after publish recorded this head's round in
+// the summary comment and set its hand-off output. A conversion that fails
+// here fails the job, since its token was granted for nothing else.
+async function handoff({ github, context, core }) {
+  const pr = context.payload.pull_request;
+  const record = storedRecord(await summaryComment(github, context, pr.number));
+  if (record?.sha !== pr.head.sha || record.count < roundLimit) {
+    core.info(
+      `The summary records no failing round ${roundLimit} for ${pr.head.sha.slice(0, 7)}; nothing to hand off.`,
+    );
+    return;
+  }
+  if ((await handOff({ github, context, core }, record)) === false) {
+    core.setFailed(`Could not move the PR back to draft after ${record.count} failing rounds. ${draftPermission}`);
   }
 }
 
@@ -182,4 +214,4 @@ async function handOff({ github, context, core }, record) {
 // failed, and it reaches the limit.
 const handsOff = (round, state) => round.counted && state === 'failure' && round.record.count >= roundLimit;
 
-module.exports = { roundLimit, storedRecord, countRound, nextRounds, roundsLine, handOff, handsOff };
+module.exports = { roundLimit, storedRecord, countRound, nextRounds, roundsLine, handOff, handsOff, handoff };

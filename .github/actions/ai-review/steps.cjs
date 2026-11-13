@@ -190,8 +190,12 @@ async function publish({ github, context, core }) {
   const settled = live !== null && (await settleHuman({ github, context, core }, pull, decision, live));
   if (held && written && settled) await setStatus(github, context, pr.head.sha, 'success', result.description);
   await postFindings({ github, context, core }, reviewers);
-  // Only the live head's review, whose summary records the round, hands off.
-  if (written && handsOff(round, result.state)) await handOff({ github, context, core }, round.record);
+  // Only the live head's review, whose summary records the round, hands off:
+  // here, or in the caller's handoff job when it runs one.
+  if (written && handsOff(round, result.state)) {
+    if (process.env.HAND_OFF === 'job') core.setOutput('hand-off', 'true');
+    else await handOff({ github, context, core }, round.record);
+  }
 }
 
 // Accepts the current head over a failing verdict, or a fork PR that is never

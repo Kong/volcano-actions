@@ -224,7 +224,13 @@ function client(options = {}) {
   const rest = { issues: issuesApi(record), pulls: pullsApi(o, record), repos: reposApi(o, record) };
   const graphql = endpoint((query, variables) => {
     calls.push({ ...variables, query, call: 'graphql' });
-    if (o.failDraft) throw httpError('Resource not accessible by integration', 403);
+    // As Octokit rejects a GraphQL response with errors: GitHub answers 200.
+    if (o.failDraft) {
+      throw Object.assign(
+        new Error('Request failed due to following response errors:\n - Resource not accessible by integration'),
+        { errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible by integration' }] },
+      );
+    }
     return {};
   });
   const github = { paginate: paginator(o, rest, calls), rest, graphql };
