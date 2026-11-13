@@ -37,7 +37,7 @@ test('the review workflows pin one action commit that is on main', () => {
 test('the workflow keeps every reviewer inside its trust boundary', () => {
   const workflow = reviewWorkflow();
   const jobs = jobsOf(workflow);
-  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'codex', 'verdict', 'override']);
+  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'codex', 'verdict', 'cost', 'override']);
 
   // Callers choose the trigger; every job that acts runs only under
   // pull_request_target, which runs the caller's base-branch stub.
@@ -113,11 +113,12 @@ test('jobs with a write token never check out the PR, and Claude reads it with n
   for (const [name, step] of [
     ['start', 'start'],
     ['verdict', 'publish'],
+    ['cost', 'cost'],
     ['override', 'override'],
   ]) {
     assert.doesNotMatch(jobs[name], /actions\/checkout|github-script/u, name);
     const uses = jobs[name].match(/(?<![\w-])uses: .*/gu);
-    const download = name === 'verdict' ? [uses[0]] : [];
+    const download = ['verdict', 'cost'].includes(name) ? [uses[0]] : [];
     assert.deepEqual(uses, [...download, `uses: ${action}`], name);
     for (const ref of download) assert.match(ref, /^uses: actions\/download-artifact@[a-f0-9]{40} # /u);
     assert.match(jobs[name], new RegExp(`\\n {10}step: ${step}\\n`, 'u'), name);

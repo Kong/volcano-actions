@@ -63,6 +63,14 @@
 #   output leaves that review incomplete.
 # - Statuses are per-SHA, so skipped runs never overwrite a verdict, a failed
 #   review is `error`, and a cancelled one stays `pending`.
+# - Each reviewer job also records what it spent, however it ended, as token
+#   counts by model in the artifact `ai-review-usage-<job ID>`, read from its
+#   CLI's session log; the log itself never leaves the runner. The cost job
+#   runs after the verdict, even when a newer push cancelled the run, and adds
+#   the run's spend to the PR's cost comment and, when the caller passes
+#   `otlp_endpoint`, to that collector. A public repository's artifacts are
+#   public, so there the usage is recorded only for a collector, kept for a
+#   day, and never shown on the PR.
 # - `ai-review-override` passes one head over a failing verdict (or a fork),
 #   and then the head needs a human review; ai-review-merge-queue.yml passes
 #   merge-group commits.
@@ -91,6 +99,10 @@ on:
         description: True when the caller runs ai-review-hand-off.yml once this workflow's `hand-off` output is 'true', to move a PR whose review has not converged back to draft. The verdict job then leaves the hand-off to it.
         type: boolean
         default: false
+      otlp_endpoint:
+        description: The base URL of an OTLP/HTTP collector to send each review's tokens and cost to, as OTEL_EXPORTER_OTLP_ENDPOINT takes it. Unset sends nothing.
+        type: string
+        default: ''
     outputs:
       hand-off:
         description: With `hand_off` set, 'true' when the caller's ai-review-hand-off.yml job should hand the PR back to its author.
@@ -101,6 +113,9 @@ on:
         required: false
       codex_access_token:
         description: The ChatGPT workspace access token the codex job runs Codex with. Every caller passes it; the codex job fails without it.
+        required: false
+      otlp_headers:
+        description: The collector's request headers as `key=value,key=value`, as OTEL_EXPORTER_OTLP_HEADERS takes them, for `otlp_endpoint`.
         required: false
 
 permissions: {}
@@ -255,6 +270,25 @@ jobs:
           name: ai-review-claude
           path: ${{ runner.temp }}/ai-review-claude.json
           if-no-files-found: error
+      # Runs however the review ended, so a cancelled or failed review still
+      # reports what it spent. A public repository records usage only for a
+      # collector, since its artifacts are public.
+      - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
+        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        with:
+          step: usage
+          provider: claude
+          model: claude-opus-5-5
+          usage-file: ${{ runner.temp }}/ai-review-usage-claude.json
+      - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          name: ai-review-usage-claude
+          path: ${{ runner.temp }}/ai-review-usage-claude.json
+          if-no-files-found: warn
+          retention-days: 1
 
   codex:
     needs: start
@@ -376,9 +410,11 @@ jobs:
             and decide human_review for the change at this head.
         # Commands Codex runs get no writes, no network, and no variable named
         # like a key, secret, or token, since Codex holds the access token.
+        # Codex keeps its session log, which the usage step reads token counts
+        # from; the log stays on the runner.
         run: |
           printf '%s' "$SCHEMA" > "$RUNNER_TEMP/codex-schema.json"
-          printf '%s' "$PROMPT" | codex exec --ephemeral --skip-git-repo-check \
+          printf '%s' "$PROMPT" | codex exec --skip-git-repo-check \
             --model "$MODEL" \
             -c 'model_reasoning_effort="xhigh"' \
             -c 'default_permissions=":read-only"' \
@@ -392,6 +428,25 @@ jobs:
           name: ai-review-codex
           path: ${{ runner.temp }}/ai-review-codex.json
           if-no-files-found: error
+      # Runs however the review ended, so a cancelled or failed review still
+      # reports what it spent. A public repository records usage only for a
+      # collector, since its artifacts are public.
+      - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
+        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        with:
+          step: usage
+          provider: codex
+          model: gpt-6.1-sol
+          usage-file: ${{ runner.temp }}/ai-review-usage-codex.json
+      - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          name: ai-review-usage-codex
+          path: ${{ runner.temp }}/ai-review-usage-codex.json
+          if-no-files-found: warn
+          retention-days: 1
 
   verdict:
     needs: [claude, codex]
@@ -416,6 +471,7 @@ jobs:
         timeout-minutes: 2
         continue-on-error: true
         with:
+          # Also matches the usage artifacts, whose files publish ignores.
           pattern: ai-review-*
           # One directory, whether one artifact matches or several.
           merge-multiple: true
@@ -429,6 +485,39 @@ jobs:
           review-outputs: ${{ runner.temp }}/ai-review-outputs
           human-review-paths: ${{ inputs.human_review_paths }}
           hand-off: ${{ inputs.hand_off && 'job' || '' }}
+
+  cost:
+    needs: [claude, codex, verdict]
+    # Runs once the verdict is out, including when a newer push cancelled the
+    # run, so cancelled rounds are counted too. A public repository runs it
+    # only for a collector.
+    if: >-
+      always() &&
+      (github.event.repository.private || inputs.otlp_endpoint != '') &&
+      (contains(needs.*.result, 'success') || contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # Writes the PR's cost comment.
+      pull-requests: write
+    steps:
+      # A reviewer without a usage file is reported with an unknown cost.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          pattern: ai-review-usage-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/ai-review-usage
+      # This job has a write token. Never check out the PR.
+      - uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        with:
+          step: cost
+          reviews: ${{ toJSON(needs) }}
+          usage-outputs: ${{ runner.temp }}/ai-review-usage
+          otlp-endpoint: ${{ inputs.otlp_endpoint }}
+          otlp-headers: ${{ secrets.otlp_headers }}
 
   override:
     if: >-

@@ -365,6 +365,39 @@ jobs:
 repository root: `*` stays within a directory, `**/` spans any number of them,
 and lines starting with `#` are comments.
 
+### Cost
+
+Each reviewer job records the tokens its review used, by model, however the
+review ended, and a `cost` job prices them once the verdict is out, including
+for rounds a newer push cancelled. In a private repository it keeps one PR
+comment with the running cost of the PR's AI reviews, finished and cancelled
+rounds apart. A reviewer on a plan with no per-token bill is priced at its
+tokens' API list price.
+
+To also send each review's tokens and cost to an OpenTelemetry collector,
+pass its OTLP/HTTP base URL and, from a secret, its request headers. Pass
+them in both `ai-review.yml` and `ai-review-retarget-override.yml`:
+
+```yaml
+jobs:
+  ai-review:
+    # uses and permissions as above
+    with:
+      otlp_endpoint: https://ingress.example.com
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
+      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
+      otlp_headers: ${{ secrets.AI_REVIEW_OTLP_HEADERS }}
+```
+
+The collector gets metrics under `service.name=gha-ai-review` and one log
+record per reviewer that names the PR, the run, and PR metadata.
+
+A public repository's PR comments, run logs, and artifacts are public. There
+the review posts no cost comment and logs no dollar figures, and records usage
+only when it has a collector to send it to. The usage artifacts hold token
+counts, from which the cost can be worked out, so they are kept for one day.
+
 ### Changing the review
 
 Callers using `@main` receive workflow changes when they merge here. Callers
