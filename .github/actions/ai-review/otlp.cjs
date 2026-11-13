@@ -163,18 +163,25 @@ function rejection(url, text) {
   return `${url} rejected ${rejected} item(s): ${String(partial.errorMessage ?? '').slice(0, 200)}`;
 }
 
-// Sends the metrics and logs. Throws when the collector refuses either, and
-// returns what it rejected from requests it accepted; a partly accepted
-// request is not sent again, which would repeat the accepted part.
+// Sends the metrics and logs side by side, so a collector that refuses one
+// still gets the other. Returns a message for each request it refused and for
+// what it rejected from requests it accepted; a partly accepted request is
+// not sent again, which would repeat the accepted part.
 async function exportSpend({ endpoint, headers, run, spend, now = Date.now(), fetchImpl = fetch }) {
   const parsed = parseHeaders(headers);
-  const metrics = await post(fetchImpl, endpoint, 'metrics', parsed, {
-    resourceMetrics: [{ resource: resource(run), scopeMetrics: [{ scope, metrics: metricsOf(run, spend, now) }] }],
-  });
-  const logs = await post(fetchImpl, endpoint, 'logs', parsed, {
-    resourceLogs: [{ resource: resource(run), scopeLogs: [{ scope, logRecords: logsOf(run, spend, now) }] }],
-  });
-  return [metrics, logs].filter(Boolean);
+  const results = await Promise.allSettled([
+    post(fetchImpl, endpoint, 'metrics', parsed, {
+      resourceMetrics: [{ resource: resource(run), scopeMetrics: [{ scope, metrics: metricsOf(run, spend, now) }] }],
+    }),
+    post(fetchImpl, endpoint, 'logs', parsed, {
+      resourceLogs: [{ resource: resource(run), scopeLogs: [{ scope, logRecords: logsOf(run, spend, now) }] }],
+    }),
+  ]);
+  // A refused connection's error does not name the request, so each refusal
+  // says which signal it lost.
+  return results
+    .map((r, i) => (r.status === 'fulfilled' ? r.value : `${['metrics', 'logs'][i]}: ${r.reason.message}`))
+    .filter(Boolean);
 }
 
 module.exports = { exportSpend, parseHeaders };
