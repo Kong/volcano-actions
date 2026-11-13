@@ -16,13 +16,14 @@
 # failed, publishes no verdict.
 #
 # After three failing rounds in a row since the PR was last marked ready for
-# review, the verdict job moves the PR back to draft, which start skips, and
-# asks the author and any coding agent working for them to re-assess the
-# approach. Marking the PR ready again starts a new set of rounds. Converting
-# a PR to draft takes a token with contents: write, which no job here holds: a
-# caller that sets `hand_off` runs ai-review-hand-off.yml for it when this
-# workflow's `hand-off` output is 'true'. Otherwise the verdict job tries with
-# its own token, which GitHub refuses, and the comment says the review goes on.
+# review, the review hands the PR back: it moves the PR to draft, which start
+# skips, and asks the author and any coding agent working for them to
+# re-assess the approach. Marking the PR ready again starts a new set of
+# rounds. Converting a PR to draft takes a token with contents: write, which
+# no job here holds: a caller that sets `hand_off` runs ai-review-hand-off.yml,
+# which hands off when this workflow's `hand-off` output is 'true'. Otherwise
+# the verdict job hands off with its own token, which GitHub refuses, so its
+# comment says the review goes on.
 #
 # To add a provider, add a job like `claude` and `codex`, list it in
 # `verdict.needs`, and add its credential secret to workflow_call.
