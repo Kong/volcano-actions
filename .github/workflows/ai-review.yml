@@ -275,6 +275,7 @@ jobs:
       # collector, since its artifacts are public.
       - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
         uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        continue-on-error: true
         with:
           step: usage
           provider: claude
@@ -433,6 +434,7 @@ jobs:
       # collector, since its artifacts are public.
       - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
         uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        continue-on-error: true
         with:
           step: usage
           provider: codex

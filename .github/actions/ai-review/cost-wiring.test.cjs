@@ -11,7 +11,7 @@ const { tempDir } = require('./test-git.cjs');
 // for a collector.
 const recorded = "always() && (github.event.repository.private || inputs.otlp_endpoint != '')";
 
-test('every reviewer job records its usage however it ended, as the artifact named for the job', () => {
+test('every reviewer job records its usage however it ended, without failing the review, as the artifact named for the job', () => {
   const jobs = jobsOf(reviewWorkflow());
   for (const name of reviewerJobs(jobs)) {
     const steps = stepsOf(jobs[name]);
@@ -19,7 +19,7 @@ test('every reviewer job records its usage however it ended, as the artifact nam
     const usage = steps.slice(steps.indexOf('step: usage') - 200);
     assert.ok(
       steps.includes(
-        `- if: ${recorded}\n        uses: ${action}\n        with:\n          step: usage\n          provider: ${name}\n`,
+        `- if: ${recorded}\n        uses: ${action}\n        continue-on-error: true\n        with:\n          step: usage\n          provider: ${name}\n`,
       ),
       name,
     );

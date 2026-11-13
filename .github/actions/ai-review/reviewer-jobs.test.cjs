@@ -55,11 +55,12 @@ test('every reviewer job uploads only its structured output, as the artifact nam
     // A missing output or a failed upload fails the job, so the review is incomplete.
     assert.match(upload, /\n {10}if-no-files-found: error(?:\n|$)/u, name);
     assert.match(upload, /\n {8}timeout-minutes: \d+\n/u, name);
-    // The other upload is the usage, the job's last step and the only one
-    // that may fail quietly, since it never decides the review.
+    // The usage step and its upload end the job and are the only steps that
+    // may fail quietly, since they never decide the review.
     assert.equal(jobs[name].match(/actions\/upload-artifact@/gu).length, 2, name);
-    assert.equal(jobs[name].match(/continue-on-error/gu).length, 1, name);
-    assert.ok(jobs[name].indexOf('continue-on-error') > jobs[name].indexOf('step: usage'), name);
+    assert.equal(jobs[name].match(/continue-on-error/gu).length, 2, name);
+    const usage = jobs[name].lastIndexOf('\n      - ', jobs[name].indexOf('step: usage'));
+    assert.ok(jobs[name].indexOf('continue-on-error') > usage, name);
     // The provider step, or one after it, writes the file the upload reads.
     const from = steps.indexOf(providers[name].step);
     const to = steps.indexOf('actions/upload-artifact@');
