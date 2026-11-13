@@ -16,9 +16,14 @@
 # failed, publishes no verdict.
 #
 # After three failing rounds in a row since the PR was last marked ready for
-# review, the verdict job moves the PR back to draft, which start skips, and
-# asks the author and any coding agent working for them to re-assess the
-# approach. Marking the PR ready again starts a new set of rounds.
+# review, the review hands the PR back: it moves the PR to draft, which start
+# skips, and asks the author and any coding agent working for them to
+# re-assess the approach. Marking the PR ready again starts a new set of
+# rounds. Converting a PR to draft takes a token with contents: write, which
+# no job here holds: a caller that sets `hand_off` runs ai-review-hand-off.yml,
+# which hands off when this workflow's `hand-off` output is 'true'. Otherwise
+# the verdict job hands off with its own token, which GitHub refuses, so its
+# comment says the review goes on.
 #
 # To add a provider, add a job like `claude` and `codex`, list it in
 # `verdict.needs`, and add its credential secret to workflow_call.
@@ -82,6 +87,14 @@ on:
         description: Bots whose PRs are reviewed. Each reviewer job refuses other bots.
         type: string
         default: dependabot[bot],kong[bot],kong-volcano-app[bot]
+      hand_off:
+        description: True when the caller runs ai-review-hand-off.yml once this workflow's `hand-off` output is 'true', to move a PR whose review has not converged back to draft. The verdict job then leaves the hand-off to it.
+        type: boolean
+        default: false
+    outputs:
+      hand-off:
+        description: With `hand_off` set, 'true' when the caller's ai-review-hand-off.yml job should hand the PR back to its author.
+        value: ${{ jobs.verdict.outputs.hand-off }}
     secrets:
       anthropic_api_key:
         description: The Anthropic API key the claude job calls Claude with. Every caller passes it; the claude job fails without it.
@@ -128,7 +141,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
         with:
           step: start
 
@@ -175,7 +188,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -294,7 +307,7 @@ jobs:
           persist-credentials: true
       # Writes the same inputs as the claude job, before the credentials go.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -394,6 +407,8 @@ jobs:
       contents: read
       pull-requests: write
       statuses: write
+    outputs:
+      hand-off: ${{ steps.publish.outputs.hand-off }}
     steps:
       # A failed or hung download must not stop publish, which would leave the
       # head pending; a missing output leaves only that review incomplete.
@@ -406,12 +421,14 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+      - id: publish
+        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
           review-outputs: ${{ runner.temp }}/ai-review-outputs
           human-review-paths: ${{ inputs.human_review_paths }}
+          hand-off: ${{ inputs.hand_off && 'job' || '' }}
 
   override:
     if: >-
@@ -426,6 +443,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+      - uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
         with:
           step: override

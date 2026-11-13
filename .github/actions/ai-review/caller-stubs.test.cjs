@@ -18,20 +18,28 @@ test('the documented label descriptions fit GitHub limits', () => {
 // called jobs use, and no concurrency group that could deadlock with its own.
 // Edits and labels run in a second workflow with other check names, so their
 // skipped runs cannot hide the review's checks on the PR page.
+const stubs = {
+  'pr-ai-review.yml': {
+    name: 'AI Review',
+    job: 'ai-review',
+    types: 'opened, synchronize, reopened, ready_for_review',
+    with: '    with:\n      hand_off: true\n',
+    // The opt-in job that moves a PR whose review has not converged back
+    // to draft, which takes contents: write. A failed reviewer job fails
+    // the called workflow, whose verdict still stands, so the job runs
+    // unless the run was cancelled.
+    after:
+      "  hand-off:\n    needs: ai-review\n    if: ${{ !cancelled() && needs.ai-review.outputs.hand-off == 'true' }}\n    uses: Kong/volcano-actions/.github/workflows/ai-review-hand-off.yml@main\n    permissions:\n      contents: write\n      pull-requests: write\n      statuses: read\n",
+  },
+  'pr-ai-review-retarget-override.yml': {
+    name: 'AI Review (retarget and override)',
+    job: 'retarget-or-override',
+    types: 'edited, labeled',
+    if: `github.event.changes.base || github.event.label.name == '${overrideLabel}'`,
+  },
+};
+
 test('the caller stubs grant what the review needs and set no concurrency', () => {
-  const stubs = {
-    'pr-ai-review.yml': {
-      name: 'AI Review',
-      job: 'ai-review',
-      types: 'opened, synchronize, reopened, ready_for_review',
-    },
-    'pr-ai-review-retarget-override.yml': {
-      name: 'AI Review (retarget and override)',
-      job: 'retarget-or-override',
-      types: 'edited, labeled',
-      if: `github.event.changes.base || github.event.label.name == '${overrideLabel}'`,
-    },
-  };
   // README.md shows them inside a list item, indented three spaces.
   const readme = readRepo('README.md').replaceAll(/^ {3}/gmu, '');
   for (const [file, want] of Object.entries(stubs)) {
@@ -48,16 +56,14 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
     assert.match(
       stub,
       new RegExp(
-        `\njobs:\n {2}${want.job}:\n${ifLine} {4}uses: Kong/volcano-actions/\\.github/workflows/ai-review\\.yml@main\n`,
+        `\njobs:\n {2}${want.job}:\n${ifLine} {4}uses: Kong/volcano-actions/\\.github/workflows/ai-review\\.yml@main\n${want.with ?? ''}`,
         'u',
       ),
       file,
     );
-    assert.match(
-      stub,
-      /\n {4}permissions:\n {6}actions: write\n {6}contents: read\n {6}pull-requests: write\n {6}statuses: write\n {4}secrets:\n {6}anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_CI_API_KEY \}\}\n {6}codex_access_token: \$\{\{ secrets\.CODEX_CI_ACCESS_TOKEN \}\}\n$/u,
-      file,
-    );
+    const review =
+      '    permissions:\n      actions: write\n      contents: read\n      pull-requests: write\n      statuses: write\n    secrets:\n      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}\n      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}\n';
+    assert.ok(stub.endsWith(`\n${review}${want.after ?? ''}`), file);
     assert.doesNotMatch(stub, /concurrency/u, file);
     assert.ok(readme.includes(shown.trim()), `README.md shows ${file}`);
   }

@@ -29,9 +29,10 @@ opened the PR, to re-assess the approach: split the PR, simplify the design,
 rethink the approach, or push back on findings they think are wrong. The
 comment tells a coding agent working on the PR to stop fixing, summarize the
 findings for the author, and wait for their decision. Marking the PR ready for
-review starts a new set. If the PR cannot be moved to draft, the comment says
-the review goes on and asks the author to convert it, once per set; a later
-round that does move it says so. The
+review starts a new set. Moving the PR to draft takes the optional `hand-off`
+job in the caller stub below. If the PR cannot be moved to draft, the comment
+says the review goes on and asks the author to convert it, once per set; a
+later round that does move it says so. The
 summary comment says which failing round each review is, and its marker
 records the count.
 
@@ -189,6 +190,8 @@ To add it to a repository:
    jobs:
      ai-review:
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
+       with:
+         hand_off: true
        permissions:
          actions: write
          contents: read
@@ -197,7 +200,26 @@ To add it to a repository:
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
          codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
+     hand-off:
+       needs: ai-review
+       if: ${{ !cancelled() && needs.ai-review.outputs.hand-off == 'true' }}
+       uses: Kong/volcano-actions/.github/workflows/ai-review-hand-off.yml@main
+       permissions:
+         contents: write
+         pull-requests: write
+         statuses: read
    ```
+
+   The `hand-off` job is optional. It moves a PR whose review has failed three
+   rounds in a row back to draft. GitHub converts a PR to draft only for a
+   token with `contents: write`, so only this job gets one; it never checks
+   out the PR and runs nothing but that step. Without it, and without
+   `hand_off: true`, the review still asks the author to re-assess, but it
+   cannot move the PR to draft and keeps reviewing each push. The job runs
+   even when a reviewer job failed, since the other reviewers' verdict
+   stands; only a cancelled run skips it. The retarget stub below does not
+   hand off, so a third failing round reached by retargeting the PR only asks
+   the author to re-assess.
 
    And `.github/workflows/ai-review-retarget-override.yml`:
 
@@ -322,13 +344,15 @@ The reviewers read the repository's base-branch `AGENTS.md` and `CLAUDE.md`,
 so keep repository rules there. MCP servers in the repository's `.mcp.json`
 do not run in the review. For review emphasis those files do not cover,
 or for other bots, pass inputs. Pass the same ones in both `ai-review.yml`
-and `ai-review-retarget-override.yml`, since a retarget reviews the PR again:
+and `ai-review-retarget-override.yml`, since a retarget reviews the PR again,
+except `hand_off`, which only the stub with the `hand-off` job sets:
 
 ```yaml
 jobs:
   ai-review:
     # uses, permissions, and secrets as above
     with:
+      hand_off: true
       focus: |
         - Accessibility regressions in rendered components
       human_review_paths: |
@@ -347,7 +371,8 @@ Callers using `@main` receive workflow changes when they merge here. Callers
 pinned to a workflow SHA need a reference update. The workflows pin the
 composite action to a full commit SHA, so action changes, including the
 policy and schema that ship with it, do not roll out until every reference to
-it in `ai-review.yml` and `ai-review-human.yml` is updated.
+it in `ai-review.yml`, `ai-review-human.yml`, and `ai-review-hand-off.yml` is
+updated.
 
 For action changes, merge the implementation first. In a separate PR, update
 the workflows' action pins to the resulting commit on `main`, using the squash
