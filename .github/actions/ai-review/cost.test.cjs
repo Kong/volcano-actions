@@ -33,7 +33,7 @@ test('spend prices each reviewer and says how its run ended', (t) => {
 
   const [cancelled] = runSpend(needs('cancelled'), dir, true);
   assert.deepEqual([cancelled.state, cancelled.reason, cancelled.partial], ['cancelled', 'superseded', true]);
-  assert.equal(runSpend(needs('cancelled'), dir, false)[0].reason, 'manual');
+  assert.equal(runSpend(needs('cancelled'), dir, false)[0].reason, 'other');
   assert.equal(runSpend(needs('failure'), dir, false)[0].reason, 'failed');
 });
 

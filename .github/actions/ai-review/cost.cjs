@@ -15,7 +15,7 @@ const { exportSpend } = require('./otlp.cjs');
 const { runUrl } = require('./constants.cjs');
 
 // Whether the PR has moved past the reviewed head, which is why a cancelled
-// review usually stopped. When the PR cannot be read, a cancel counts as manual.
+// review usually stopped. When the PR cannot be read, a cancel counts as `other`.
 async function supersededHead(github, context, core) {
   try {
     return (await livePull(github, context)).head.sha !== context.payload.pull_request.head.sha;

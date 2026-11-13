@@ -127,8 +127,13 @@ test('the usage step writes the totals, and only the totals, for the job to uplo
 
 test('the usage step records no models, with a warning, when the session log is missing', (t) => {
   const out = path.join(tempDir(t, 'out-'), 'ai-review-usage-codex.json');
-  Object.assign(process.env, { PROVIDER: 'codex', USAGE_FILE: out, CODEX_HOME: tempDir(t, 'codex-home-') });
-  clearAfter(t, 'PROVIDER', 'USAGE_FILE', 'CODEX_HOME');
+  Object.assign(process.env, {
+    PROVIDER: 'codex',
+    USAGE_FILE: out,
+    CODEX_HOME: tempDir(t, 'codex-home-'),
+    GITHUB_RUN_ATTEMPT: '1',
+  });
+  clearAfter(t, 'PROVIDER', 'USAGE_FILE', 'CODEX_HOME', 'GITHUB_RUN_ATTEMPT');
   const k = core();
   usage({ core: k });
   assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), { provider: 'codex', attempt: 1, models: {} });

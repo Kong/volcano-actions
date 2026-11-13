@@ -19,11 +19,12 @@ function usageOf(dir, id) {
 }
 
 // Whether a run that stopped early was superseded by a newer head, or
-// stopped for another reason, such as someone cancelling it.
+// stopped for another reason: a person cancelling it, a retarget cancelling
+// the same head's review, or a job timeout. Which of those is not known.
 const stateOf = (result, superseded) => {
   if (result === 'success') return { state: 'finished', reason: 'completed' };
   if (result === 'failure') return { state: 'finished', reason: 'failed' };
-  return { state: 'cancelled', reason: superseded ? 'superseded' : 'manual' };
+  return { state: 'cancelled', reason: superseded ? 'superseded' : 'other' };
 };
 
 // One reviewer's spend. A review that did not complete may have had a model
