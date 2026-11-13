@@ -1,10 +1,12 @@
 'use strict';
 
 // The `cost` step: runs once every reviewer job ends, however it ended,
-// including when a newer push cancelled the run. It adds the run's spend to
-// the PR's cost comment and, when the caller passes a collector, sends it as
-// OpenTelemetry metrics and logs. Cost is reported beside the review, so
-// nothing here fails the job.
+// including when a newer push cancelled the run. In a private repository it
+// adds the run's spend to the PR's cost comment and the job log; a public
+// repository's PRs and logs are public, so there it shows no dollar figures.
+// When the caller passes a collector, it sends the spend as OpenTelemetry
+// metrics and logs. Cost is reported beside the review, so nothing here
+// fails the job.
 
 const { livePull } = require('./github.cjs');
 const { runSpend } = require('./spend.cjs');
@@ -23,10 +25,14 @@ async function supersededHead(github, context, core) {
   }
 }
 
-function report(core, spend) {
+// Whether the PR and its run log are visible only inside the organization.
+// A payload without the repository counts as public.
+const privateRepo = (context) => context.payload.repository?.private === true;
+
+function report(core, spend, showCost) {
   for (const r of spend) {
     core.info(
-      `${r.reviewer} (${r.model || 'no model'}): ${r.state}/${r.reason}, ${r.calls} call(s), $${r.cost.toFixed(4)}`,
+      `${r.reviewer} (${r.model || 'no model'}): ${r.state}/${r.reason}, ${r.calls} call(s)${showCost ? `, $${r.cost.toFixed(4)}` : ''}`,
     );
     if (!r.recorded) core.warning(`The ${r.reviewer} review recorded no usage, so its cost is unknown.`);
     else if (!r.priced) core.warning(`No price is listed for ${r.model}; its tokens are reported without a cost.`);
@@ -41,10 +47,12 @@ async function cost({ github, context, core, timing }) {
     core.notice('No AI review ran in this attempt, so there is no cost to record.');
     return;
   }
-  report(core, spend);
+  const shown = privateRepo(context);
+  report(core, spend, shown);
+  if (!shown) core.info('This repository is public, so the cost goes only to the collector, not to the PR.');
   // The ledger write waits at least `settle` before it re-checks, so the
   // export goes out alongside it rather than after it.
-  await Promise.all([record(github, context, core, spend, timing), send(context, core, spend)]);
+  await Promise.all([shown && record(github, context, core, spend, timing), send(context, core, spend)]);
 }
 
 async function record(github, context, core, spend, timing) {

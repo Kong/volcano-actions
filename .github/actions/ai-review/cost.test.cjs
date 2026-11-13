@@ -189,6 +189,33 @@ test('the cost step exports without waiting for the ledger write to settle', asy
   assert.deepEqual(k.warnings, []);
 });
 
+test('the cost step shows no dollar figures on a public repository but still exports', async (t) => {
+  Object.assign(process.env, {
+    REVIEWS: needs('success'),
+    USAGE_OUTPUTS: usageDir(t),
+    OTLP_ENDPOINT: 'https://otlp.example',
+  });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS', 'OTLP_ENDPOINT');
+  const posted = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    resolved((url) => {
+      posted.push(url);
+      return { ok: true, text: () => Promise.resolve('{}') };
+    }),
+  );
+  const c = commentsClient();
+  const k = { ...core(), infos: [] };
+  k.info = (message) => k.infos.push(message);
+  await cost({ github: c.github, context: context({ privateRepo: false }), core: k, timing: noWait });
+  assert.deepEqual(c.calls, []);
+  assert.deepEqual(c.comments(), []);
+  assert.deepEqual(posted, ['https://otlp.example/v1/metrics', 'https://otlp.example/v1/logs']);
+  assert.ok(k.infos.length > 0);
+  assert.ok(!k.infos.some((line) => line.includes('$')), 'the log shows a dollar figure');
+});
+
 test('the cost step records nothing when no review ran', async (t) => {
   Object.assign(process.env, { REVIEWS: needs('skipped'), USAGE_OUTPUTS: tempDir(t, 'usage-') });
   clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS');
