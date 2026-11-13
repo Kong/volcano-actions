@@ -140,7 +140,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        uses: Kong/volcano-actions/.github/actions/ai-review@c522fc00761f5b0cf65af193c5bf94e3a2b88198
         with:
           step: start
 
@@ -187,7 +187,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        uses: Kong/volcano-actions/.github/actions/ai-review@c522fc00761f5b0cf65af193c5bf94e3a2b88198
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -306,7 +306,7 @@ jobs:
           persist-credentials: true
       # Writes the same inputs as the claude job, before the credentials go.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        uses: Kong/volcano-actions/.github/actions/ai-review@c522fc00761f5b0cf65af193c5bf94e3a2b88198
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -421,7 +421,7 @@ jobs:
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
       - id: publish
-        uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        uses: Kong/volcano-actions/.github/actions/ai-review@c522fc00761f5b0cf65af193c5bf94e3a2b88198
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
@@ -442,6 +442,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+      - uses: Kong/volcano-actions/.github/actions/ai-review@c522fc00761f5b0cf65af193c5bf94e3a2b88198
         with:
           step: override

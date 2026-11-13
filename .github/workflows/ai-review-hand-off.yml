@@ -32,6 +32,6 @@ jobs:
       statuses: read
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+      - uses: Kong/volcano-actions/.github/actions/ai-review@c522fc00761f5b0cf65af193c5bf94e3a2b88198
         with:
           step: handoff
