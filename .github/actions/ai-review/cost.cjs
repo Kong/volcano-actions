@@ -78,8 +78,8 @@ async function send(context, core, spend) {
     url: runUrl(context),
   };
   try {
-    const rejected = await exportSpend({ endpoint, headers: process.env.OTLP_HEADERS, run, spend });
-    for (const message of rejected) core.warning(`The collector rejected part of the AI review cost: ${message}`);
+    const problems = await exportSpend({ endpoint, headers: process.env.OTLP_HEADERS, run, spend });
+    for (const message of problems) core.warning(`Could not export all of the AI review cost: ${message}`);
   } catch (error) {
     core.warning(`Could not export the AI review cost: ${error.message}`);
   }

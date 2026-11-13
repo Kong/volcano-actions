@@ -94,8 +94,10 @@ any number of reviewers:
    output to `ai-review-<job ID>.json` and uploads that file alone as the
    artifact `ai-review-<job ID>`, which the verdict job downloads. A job
    output would reach publish through an environment variable, which holds at
-   most 128 KiB.
-2. List the job in the `verdict` job's `needs`.
+   most 128 KiB. It ends, like them, with the action's `step: usage` and the
+   upload of `ai-review-usage-<job ID>`, which the cost job downloads.
+2. List the job in the `needs` of the `verdict` and `cost` jobs; the cost job
+   prices only the reviewers it needs.
 3. Add its credential to the workflow's secrets, with `required: false`, and
    to the caller stubs below.
 4. Add the job to the provider list in
@@ -364,6 +366,39 @@ jobs:
 `human_review_paths` takes one glob per line, matched against paths from the
 repository root: `*` stays within a directory, `**/` spans any number of them,
 and lines starting with `#` are comments.
+
+### Cost
+
+Each reviewer job records the tokens its review used, by model, however the
+review ended, and a `cost` job prices them once the verdict is out, including
+for rounds a newer push cancelled. In a private repository it keeps one PR
+comment with the running cost of the PR's AI reviews, finished and cancelled
+rounds apart. A reviewer on a plan with no per-token bill is priced at its
+tokens' API list price.
+
+To also send each review's tokens and cost to an OpenTelemetry collector,
+pass its OTLP/HTTP base URL and, from a secret, its request headers. Pass
+them in both `ai-review.yml` and `ai-review-retarget-override.yml`:
+
+```yaml
+jobs:
+  ai-review:
+    # uses and permissions as above
+    with:
+      otlp_endpoint: https://ingress.example.com
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
+      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
+      otlp_headers: ${{ secrets.AI_REVIEW_OTLP_HEADERS }}
+```
+
+The collector gets metrics under `service.name=gha-ai-review` and one log
+record per reviewer that names the PR, the run, and PR metadata.
+
+A public repository's PR comments, run logs, and artifacts are public. There
+the review posts no cost comment and logs no dollar figures, and records usage
+only when it has a collector to send it to. The usage artifacts hold token
+counts, from which the cost can be worked out, so they are kept for one day.
 
 ### Changing the review
 

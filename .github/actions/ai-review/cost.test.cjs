@@ -169,7 +169,13 @@ test('the cost step records the round and exports it, and a refused export only 
   assert.equal(ledger.rounds['9/1'].state, 'cancelled');
   assert.match(comment.body, /- Cancelled: ~\$9\.40 \(1 round\)/u);
   assert.equal(k.failures.length, 0);
-  assert.match(k.warnings.at(-1), /Could not export the AI review cost/u);
+  // Port 9 refuses both requests, and each is reported.
+  assert.deepEqual(
+    k.warnings
+      .slice(-2)
+      .map((w) => w.match(/^Could not export all of the AI review cost: (metrics|logs): /u)?.[1] ?? w),
+    ['metrics', 'logs'],
+  );
 });
 
 test('the cost step exports without waiting for the ledger write to settle', async (t) => {
@@ -238,6 +244,21 @@ test('the cost step records nothing when no review ran', async (t) => {
   await cost({ github: c.github, context: context(), core: k, timing: noWait });
   assert.deepEqual(c.calls, []);
   assert.match(k.notices[0], /No AI review ran/u);
+});
+
+test('a refused metrics request still sends the logs, and is reported', async (t) => {
+  const posted = [];
+  const fetchImpl = resolved((url) => {
+    posted.push(url);
+    if (url.endsWith('/v1/metrics')) return { ok: false, status: 503, text: () => Promise.resolve('down') };
+    return { ok: true, text: () => Promise.resolve('{}') };
+  });
+  const run = { repo: 'Kong/volcano-hosting', pr: 7, runId: 9, attempt: 1, url: 'u' };
+  const spend = runSpend(needs('success'), usageDir(t), false);
+  assert.deepEqual(await exportSpend({ endpoint: 'https://otlp.example', headers: '', run, spend, fetchImpl }), [
+    'metrics: https://otlp.example/v1/metrics answered 503: down',
+  ]);
+  assert.deepEqual(posted.toSorted(), ['https://otlp.example/v1/logs', 'https://otlp.example/v1/metrics']);
 });
 
 test('the export reports what an accepting collector rejected', async (t) => {
