@@ -40,7 +40,10 @@ test('with a handoff job, publish leaves the third failing round to it', async (
   const { c, k } = await publishForJob(t, { since: opened, count: 2, sha: otherHead });
   assert.equal(k.outputs['hand-off'], 'true');
   assert.deepEqual(c.named('graphql'), []);
-  assert.equal(c.named('createComment').find((w) => isHandOff(w)), undefined);
+  assert.equal(
+    c.named('createComment').find((w) => isHandOff(w)),
+    undefined,
+  );
 });
 
 test('with a handoff job, publish asks for none before the limit', async (t) => {
