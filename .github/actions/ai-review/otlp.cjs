@@ -79,7 +79,7 @@ function metricsOf(run, spend, now) {
     sum(
       'ai_review.cost',
       'USD',
-      spend.filter((r) => r.priced).map((r) => point(r, { 'vcs.change.id': String(run.pr) }, { asDouble: r.cost })),
+      spend.filter((r) => r.known).map((r) => point(r, { 'vcs.change.id': String(run.pr) }, { asDouble: r.cost })),
     ),
     sum(
       'ai_review.reviews',

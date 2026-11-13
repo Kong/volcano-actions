@@ -34,7 +34,7 @@ function reviewerSpend(id, job, usage, superseded) {
   const models = Object.entries(usage?.models ?? {});
   const tokens = emptyTokens();
   let cost = 0;
-  let priced = models.length > 0;
+  let priced = true;
   for (const [model, entry] of models) {
     addTokens(tokens, entry.tokens);
     const dollars = costOf(model, entry.tokens);
@@ -51,11 +51,14 @@ function reviewerSpend(id, job, usage, superseded) {
     calls: models.reduce((sum, [, entry]) => sum + (entry.calls ?? 0), 0),
     tokens,
     cost,
+    // Whether every model it called has a price.
     priced,
-    recorded: usage !== null,
+    // Whether its log recorded any model call. A review stopped before its
+    // first call ended, or one whose log is missing, recorded none.
+    recorded: models.length > 0,
     // A cost the comment cannot state exactly: no usage was recorded, or a
     // model has no price.
-    known: usage !== null && priced,
+    known: models.length > 0 && priced,
     partial: job.result !== 'success',
     start: usage?.start,
     end: usage?.end,

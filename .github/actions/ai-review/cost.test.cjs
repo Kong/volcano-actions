@@ -67,6 +67,20 @@ test('an unknown cost shows as ? and makes the totals a lower bound', (t) => {
   assert.match(body, /\| `abcdef1` \| finished \| \? \| \? \| ~\$0\.00 \|/u);
 });
 
+test('a reviewer whose log recorded no call is reported as recording no usage, not as unpriced', async (t) => {
+  const empty = { provider: 'codex', attempt: 1, models: {} };
+  Object.assign(process.env, {
+    REVIEWS: needs('success', 'cancelled'),
+    USAGE_OUTPUTS: usageDir(t, { claude: claudeUsage, codex: empty }),
+  });
+  clearAfter(t, 'REVIEWS', 'USAGE_OUTPUTS');
+  const k = core();
+  await cost({ github: commentsClient().github, context: context(), core: k, timing: noWait });
+  assert.deepEqual(k.warnings, ['The Codex review recorded no usage, so its cost is unknown.']);
+  const [codex] = runSpend(process.env.REVIEWS, process.env.USAGE_OUTPUTS, false).filter((r) => r.job === 'codex');
+  assert.deepEqual([codex.recorded, codex.priced, codex.known], [false, true, false]);
+});
+
 test('a re-run records only the reviewers it ran, not those carried over from an earlier attempt', (t) => {
   const dir = usageDir(t, { claude: claudeUsage, codex: { ...codexUsage, attempt: 2 } });
   assert.deepEqual(
