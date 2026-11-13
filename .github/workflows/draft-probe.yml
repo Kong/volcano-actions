@@ -1,0 +1,31 @@
+# Temporary probe: which GITHUB_TOKEN permissions convertPullRequestToDraft needs.
+name: Draft probe
+on:
+  pull_request:
+    branches: [skeever/draft-probe-base]
+    types: [opened, ready_for_review]
+permissions: {}
+jobs:
+  pr-write-only:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ID: ${{ github.event.pull_request.node_id }}
+        run: |
+          gh api graphql -f query='mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }' -f id="$ID" || echo "RESULT: failed with contents: read"
+  contents-write:
+    needs: pr-write-only
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ID: ${{ github.event.pull_request.node_id }}
+        run: |
+          gh api graphql -f query='mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }' -f id="$ID"
