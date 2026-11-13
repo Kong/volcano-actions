@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { reviewWorkflow, action, jobsOf, stepsOf, reviewerJobs } = require('./test-workflow.cjs');
+const { reviewWorkflow, action, jobsOf, stepsOf, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
 const { tempDir } = require('./test-git.cjs');
 
 // A public repository's artifacts are public, so usage is recorded there only
@@ -24,6 +24,8 @@ test('every reviewer job records its usage however it ended, without failing the
       name,
     );
     assert.ok(usage.includes(`\n          usage-file: ${file}\n`), name);
+    // The model the job runs, which prices a session log that names none.
+    assert.ok(usage.includes(`\n          model: ${outputsOf(jobs[name]).model}\n`), name);
     const upload = steps.slice(steps.lastIndexOf('actions/upload-artifact@'));
     assert.ok(steps.lastIndexOf(`- if: ${recorded}\n        uses: actions/upload-artifact@`) !== -1, name);
     assert.ok(upload.includes(`\n          name: ai-review-usage-${name}\n          path: ${file}\n`), name);
