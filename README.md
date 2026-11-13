@@ -344,13 +344,15 @@ The reviewers read the repository's base-branch `AGENTS.md` and `CLAUDE.md`,
 so keep repository rules there. MCP servers in the repository's `.mcp.json`
 do not run in the review. For review emphasis those files do not cover,
 or for other bots, pass inputs. Pass the same ones in both `ai-review.yml`
-and `ai-review-retarget-override.yml`, since a retarget reviews the PR again:
+and `ai-review-retarget-override.yml`, since a retarget reviews the PR again,
+except `hand_off`, which only the stub with the `hand-off` job sets:
 
 ```yaml
 jobs:
   ai-review:
     # uses, permissions, and secrets as above
     with:
+      hand_off: true
       focus: |
         - Accessibility regressions in rendered components
       human_review_paths: |
