@@ -161,7 +161,7 @@ const forbidden = (error) =>
   (Array.isArray(error.errors) && error.errors.some((e) => e?.type === 'FORBIDDEN')) ||
   /Resource not accessible by integration/u.test(error.message ?? '');
 // The error, and for a refusal the permissions the token lacks.
-const why = (error) => (forbidden(error) ? `${error.message} ${draftPermission}` : error.message);
+const why = (error) => (forbidden(error) ? `${error.message}\n${draftPermission}` : error.message);
 
 // Moves the PR to draft, which start() never reviews, and asks the author to
 // re-assess the approach, once the PR and its verdict are read again. The

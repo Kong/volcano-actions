@@ -68,7 +68,7 @@ test('the handoff step fails, naming the permission, when its token cannot conve
   assert.equal(k.failures.length, 1);
   assert.match(
     k.failures[0],
-    /^Could not move the PR back to draft after 3 failing rounds: Request failed due to following response errors:\n - Resource not accessible by integration Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the action's handoff step in a job of its own with those and statuses: read\.$/u,
+    /^Could not move the PR back to draft after 3 failing rounds: Request failed due to following response errors:\n - Resource not accessible by integration\nConverting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the action's handoff step in a job of its own with those and statuses: read\.$/u,
   );
 });
 
