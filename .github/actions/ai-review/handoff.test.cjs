@@ -68,7 +68,7 @@ test('the handoff step fails, naming the permission, when its token cannot conve
   assert.equal(k.failures.length, 1);
   assert.match(
     k.failures[0],
-    /^Could not move the PR back to draft after 3 failing rounds\. Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write/u,
+    /^Could not move the PR back to draft after 3 failing rounds\. Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the action's handoff step in a job of its own with those and statuses: read\.$/u,
   );
 });
 
@@ -83,6 +83,16 @@ test('the handoff step hands off only a head whose summary records the limit', a
     assert.deepEqual(drafted, []);
     assert.deepEqual(k.failures, []);
   }
+});
+
+test('the handoff step leaves a PR marked ready again since publish counted the round', async () => {
+  const { k, handOff, drafted } = await runHandoff({
+    comments: [summary({ since: opened, count: 3, sha })],
+    timeline: [{ event: 'ready_for_review', created_at: '2026-10-24T09:00:00Z' }],
+  });
+  assert.equal(handOff, undefined);
+  assert.deepEqual(drafted, []);
+  assert.deepEqual(k.failures, []);
 });
 
 test('the handoff step leaves a PR that is no longer ready and failing', async () => {

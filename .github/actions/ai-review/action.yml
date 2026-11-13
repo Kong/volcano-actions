@@ -21,7 +21,7 @@ inputs:
     description: For publish, newline-separated globs of paths whose changes need a human review.
     default: ''
   hand-off:
-    description: For publish, `job` when the caller runs the handoff step in a job of its own, whose token has contents and pull-requests write, to hand back a PR whose review has not converged. Publish then sets its `hand-off` output instead of handing off itself, since converting a PR to draft takes contents write. Unset hands off in publish, which only warns when its token cannot convert the PR.
+    description: For publish, `job` when the caller runs the handoff step in a job of its own, whose token has contents and pull-requests write and statuses read, to hand back a PR whose review has not converged. Publish then sets its `hand-off` output instead of handing off itself, since converting a PR to draft takes contents write. Unset hands off in publish, which only warns when its token cannot convert the PR.
     default: ''
   provider:
     description: For usage, the reviewer's CLI whose session log to read, `claude` or `codex`.

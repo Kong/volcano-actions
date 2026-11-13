@@ -153,10 +153,10 @@ async function stillFailing({ github, context, core }, sha) {
 
 // GitHub refuses convertPullRequestToDraft to a GITHUB_TOKEN without
 // contents: write, even with pull-requests: write. The verdict job's token has
-// contents: read, so a caller that grants contents: write to a separate
-// handoff job (see README.md) is the one whose PRs move to draft.
+// contents: read, so a caller that grants contents: write to a separate job
+// running the handoff step is the one whose PRs move to draft.
 const draftPermission =
-  'Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the handoff step in its own job with them (see README.md).';
+  "Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the action's handoff step in a job of its own with those and statuses: read.";
 const forbidden = (error) =>
   (Array.isArray(error.errors) && error.errors.some((e) => e?.type === 'FORBIDDEN')) ||
   /Resource not accessible by integration/u.test(error.message ?? '');
@@ -192,16 +192,24 @@ async function handOff({ github, context, core }, record) {
   return drafted;
 }
 
-// The handoff step: hands the PR back to its author in a job of its own, whose
-// token can convert it to draft, after publish recorded this head's round in
-// the summary comment and set its hand-off output. A conversion that fails
-// here fails the job, since its token was granted for nothing else.
-async function handoff({ github, context, core }) {
+// Whether the summary's rounds record reaches the limit at this head in the
+// current set, so a PR marked ready again since publish is not handed off on
+// the old set's count.
+async function dueAt(github, context, record) {
+  if (record?.sha !== context.payload.pull_request.head.sha || record.count < roundLimit) return false;
+  return record.since === (await roundsSince(github, context, await livePull(github, context)));
+}
+
+// The action's handoff step: hands the PR back to its author in a job of its
+// own, whose token can convert it to draft, after publish recorded this head's
+// round in the summary comment and set its hand-off output. A conversion that
+// fails here fails the job, since its token was granted for nothing else.
+async function handoffStep({ github, context, core }) {
   const pr = context.payload.pull_request;
   const record = storedRecord(await summaryComment(github, context, pr.number));
-  if (record?.sha !== pr.head.sha || record.count < roundLimit) {
+  if (!(await dueAt(github, context, record))) {
     core.info(
-      `The summary records no failing round ${roundLimit} for ${pr.head.sha.slice(0, 7)}; nothing to hand off.`,
+      `The summary records no failing round ${roundLimit} for ${pr.head.sha.slice(0, 7)} in this set; nothing to hand off.`,
     );
     return;
   }
@@ -214,4 +222,4 @@ async function handoff({ github, context, core }) {
 // failed, and it reaches the limit.
 const handsOff = (round, state) => round.counted && state === 'failure' && round.record.count >= roundLimit;
 
-module.exports = { roundLimit, storedRecord, countRound, nextRounds, roundsLine, handOff, handsOff, handoff };
+module.exports = { roundLimit, storedRecord, countRound, nextRounds, roundsLine, handOff, handsOff, handoffStep };

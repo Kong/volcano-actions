@@ -6,7 +6,7 @@ const { statusContext, humanStatusContext, overrideLabel, humanLabel, marker, se
 const { verdict } = require('./verdict.cjs');
 const { globRegExp } = require('./paths.cjs');
 const { start, publish, override, gate } = require('./steps.cjs');
-const { handoff } = require('./rounds.cjs');
+const { handoffStep } = require('./rounds.cjs');
 const { prepare } = require('./prepare.cjs');
 const { usage } = require('./usage.cjs');
 const { cost } = require('./cost.cjs');
@@ -25,7 +25,7 @@ module.exports = {
   publish,
   override,
   gate,
-  handoff,
+  handoff: handoffStep,
   usage,
   cost,
 };
