@@ -226,7 +226,7 @@ test('one verdict job publishes every reviewer once any of them finishes', () =>
   );
   const steps = stepsOf(job);
   assert.equal(steps.match(/\n {6}- /gu).length, 2);
-  assert.ok(steps.indexOf('actions/download-artifact@') < steps.indexOf(`- uses: ${action}\n`));
+  assert.ok(steps.indexOf('actions/download-artifact@') < steps.indexOf(`- id: publish\n        uses: ${action}\n`));
   // Every reviewer's artifact, into one directory, and never a reason to skip publish.
   const download = stepText(job, 'actions/download-artifact@');
   assert.match(download, /^actions\/download-artifact@[a-f0-9]{40} # v[\d.]+\n/u);

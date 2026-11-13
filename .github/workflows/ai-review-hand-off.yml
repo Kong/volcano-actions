@@ -1,0 +1,37 @@
+# Moves a PR whose AI review has not converged back to draft, and asks its
+# author to re-assess the approach. ai-review.yml decides when: a caller that
+# sets its `hand_off` input calls this workflow once its `hand-off` output is
+# 'true'. See README.md.
+#
+# - GitHub refuses convertPullRequestToDraft to a GITHUB_TOKEN without
+#   contents: write, even with pull-requests: write. This job holds that token
+#   so no job in ai-review.yml has to, and it runs nothing else: it never
+#   checks out the PR and reads only the PR, its summary comment, and its
+#   verdict status.
+# - The step reads the round the summary comment records for the head again,
+#   and hands off only a PR that is still open, ready, at that head, and
+#   failing. A conversion GitHub refuses still posts the comment, then fails
+#   the job.
+
+name: AI Review (hand-off)
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  hand-off:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # convertPullRequestToDraft takes contents: write.
+      contents: write
+      pull-requests: write
+      statuses: read
+    steps:
+      # This job has a write token. Never check out the PR.
+      - uses: Kong/volcano-actions/.github/actions/ai-review@0be3a52977d47d4013e99c398773602ded292819
+        with:
+          step: handoff

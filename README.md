@@ -29,9 +29,10 @@ opened the PR, to re-assess the approach: split the PR, simplify the design,
 rethink the approach, or push back on findings they think are wrong. The
 comment tells a coding agent working on the PR to stop fixing, summarize the
 findings for the author, and wait for their decision. Marking the PR ready for
-review starts a new set. If the PR cannot be moved to draft, the comment says
-the review goes on and asks the author to convert it, once per set; a later
-round that does move it says so. The
+review starts a new set. Moving the PR to draft takes the optional `hand-off`
+job in the caller stub below. If the PR cannot be moved to draft, the comment
+says the review goes on and asks the author to convert it, once per set; a
+later round that does move it says so. The
 summary comment says which failing round each review is, and its marker
 records the count.
 
@@ -189,6 +190,8 @@ To add it to a repository:
    jobs:
      ai-review:
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
+       with:
+         hand_off: true
        permissions:
          actions: write
          contents: read
@@ -197,7 +200,22 @@ To add it to a repository:
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
          codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
+     hand-off:
+       needs: ai-review
+       if: needs.ai-review.outputs.hand-off == 'true'
+       uses: Kong/volcano-actions/.github/workflows/ai-review-hand-off.yml@main
+       permissions:
+         contents: write
+         pull-requests: write
+         statuses: read
    ```
+
+   The `hand-off` job is optional. It moves a PR whose review has failed three
+   rounds in a row back to draft. GitHub converts a PR to draft only for a
+   token with `contents: write`, so only this job gets one; it never checks
+   out the PR and runs nothing but that step. Without it, and without
+   `hand_off: true`, the review still asks the author to re-assess, but it
+   cannot move the PR to draft and keeps reviewing each push.
 
    And `.github/workflows/ai-review-retarget-override.yml`:
 

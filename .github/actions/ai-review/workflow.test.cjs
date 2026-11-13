@@ -22,10 +22,11 @@ const { tempDir } = require('./test-git.cjs');
 const { reviewWorkflow, action, jobsOf, stepText, reviewerJobs } = require('./test-workflow.cjs');
 
 const humanWorkflow = () => readRepo('.github/workflows/ai-review-human.yml');
+const handOffWorkflow = () => readRepo('.github/workflows/ai-review-hand-off.yml');
 
 // CI fetches main's history, so a commit squash-merging dropped fails here.
 test('the review workflows pin one action commit that is on main', () => {
-  for (const workflow of [reviewWorkflow(), humanWorkflow()]) {
+  for (const workflow of [reviewWorkflow(), humanWorkflow(), handOffWorkflow()]) {
     const refs = [...workflow.matchAll(/uses: (Kong\/volcano-actions\/\.github\/actions\/[^\s#]+)/gu)].map((m) => m[1]);
     assert.ok(refs.length > 0);
     for (const ref of refs) assert.equal(ref, action);
@@ -129,6 +130,37 @@ test('jobs with a write token never check out the PR, and Claude reads it with n
   assert.match(jobs.claude, /"Read\(\/\$\{\{ github\.workspace \}\}\/\.git\/\*\*\)"/u);
 });
 
+// Converting a PR to draft takes contents: write, which only this job holds.
+test('only the hand-off job holds contents write, and it runs only the handoff step', () => {
+  for (const [name, job] of Object.entries(jobsOf(reviewWorkflow()))) {
+    assert.doesNotMatch(job, /\n {6}contents: write\n/u, name);
+  }
+  const { 'hand-off': job, ...others } = jobsOf(handOffWorkflow());
+  assert.deepEqual(Object.keys(others), []);
+  assert.match(handOffWorkflow(), /\npermissions: \{\}\n/u);
+  assert.match(job, /\n {4}if: github\.event_name == 'pull_request_target'\n/u);
+  assert.match(
+    job,
+    /\n {4}permissions:\n(?: {6}#.*\n)* {6}contents: write\n {6}pull-requests: write\n {6}statuses: read\n/u,
+  );
+  assert.doesNotMatch(job, /actions\/checkout|github-script|secrets\./u);
+  assert.deepEqual(job.match(/(?<![\w-])uses: .*/gu), [`uses: ${action}`]);
+  assert.match(job, /\n {10}step: handoff\n$/u);
+});
+
+test('the verdict job leaves the hand-off to the caller only when it asks', () => {
+  const workflow = reviewWorkflow();
+  const { verdict } = jobsOf(workflow);
+  assert.match(workflow, /\n {6}hand_off:\n(?: {8}.*\n)* {8}type: boolean\n {8}default: false\n/u);
+  assert.match(
+    workflow,
+    /\n {6}hand-off:\n(?: {8}description: .*\n) {8}value: \$\{\{ jobs\.verdict\.outputs\.hand-off \}\}\n/u,
+  );
+  assert.match(verdict, /\n {4}outputs:\n {6}hand-off: \$\{\{ steps\.publish\.outputs\.hand-off \}\}\n/u);
+  assert.match(verdict, /\n {6}- id: publish\n {8}uses: /u);
+  assert.match(verdict, /\n {10}hand-off: \$\{\{ inputs\.hand_off && 'job' \|\| '' \}\}\n/u);
+});
+
 test('the review workflow interpolates no untrusted event text', () => {
   const workflow = reviewWorkflow();
   const jobs = jobsOf(workflow);
@@ -143,6 +175,7 @@ test('the reusable workflows and composite action pin every action to a full com
   for (const file of [
     '.github/workflows/ai-review.yml',
     '.github/workflows/ai-review-human.yml',
+    '.github/workflows/ai-review-hand-off.yml',
     '.github/actions/ai-review/action.yml',
   ]) {
     const refs = [...readRepo(file).matchAll(/\buses: ([^\s#]+)/gu)].map((match) => match[1]);

@@ -13,6 +13,8 @@ permissions: {}
 jobs:
   ai-review:
     uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
+    with:
+      hand_off: true
     permissions:
       actions: write
       contents: read
@@ -21,3 +23,11 @@ jobs:
     secrets:
       anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
       codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
+  hand-off:
+    needs: ai-review
+    if: needs.ai-review.outputs.hand-off == 'true'
+    uses: Kong/volcano-actions/.github/workflows/ai-review-hand-off.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: read
