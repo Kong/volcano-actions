@@ -165,7 +165,10 @@ test('the PR is read again before the hand-off, and only a ready PR at this head
 test('a failed draft conversion only warns, says the review goes on, and asks once per set', async (t) => {
   const first = await publishRound(t, { comments: [twoFailed], failDraft: true });
   assert.deepEqual(first.k.failures, []);
-  assert.match(first.k.warnings.join('\n'), /Could not move the PR back to draft after 3 failing rounds/u);
+  assert.match(
+    first.k.warnings.join('\n'),
+    /Could not move the PR back to draft after 3 failing rounds: .*Resource not accessible by integration Converting a PR to draft takes a GITHUB_TOKEN with contents: write/su,
+  );
   assert.match(
     first.handOff.body,
     /could not move this PR back to draft, so it keeps reviewing each push\. Convert the PR to draft yourself/u,

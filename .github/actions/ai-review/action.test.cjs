@@ -25,7 +25,7 @@ test('the action runs only the exported steps and passes inputs through env', ()
   const script = text.split('script: |\n')[1];
   assert.doesNotMatch(script, /\$\{\{/u);
   const allowed = JSON.parse(script.match(/\[('prepare'.*?)\]/u)[0].replaceAll("'", '"'));
-  assert.deepEqual(allowed, ['prepare', 'start', 'publish', 'override', 'gate', 'usage', 'cost']);
+  assert.deepEqual(allowed, ['prepare', 'start', 'publish', 'override', 'gate', 'handoff', 'usage', 'cost']);
   for (const step of allowed) assert.equal(typeof review[step], 'function', step);
   const inputs = text.split('\ninputs:\n')[1].split('\noutputs:\n')[0];
   const names = [...inputs.matchAll(/^ {2}([a-z-]+):\n/gmu)].map((match) => match[1]);
@@ -52,7 +52,15 @@ test('prepare runs its shell script first, from the action, with inputs in env',
 test("the action's outputs are the script step's, under the same names", () => {
   const outputs = yml().split('\noutputs:\n')[1].split('\nruns:\n')[0];
   const names = [...outputs.matchAll(/^ {2}([a-z-]+):\n/gmu)].map((match) => match[1]);
-  assert.deepEqual(names, ['review', 'inputs', 'candidates', 'policy', 'schema', 'schema-without-max-length']);
+  assert.deepEqual(names, [
+    'review',
+    'inputs',
+    'candidates',
+    'policy',
+    'schema',
+    'schema-without-max-length',
+    'hand-off',
+  ]);
   for (const name of names) {
     assert.ok(outputs.includes(`\n    value: \${{ steps.run.outputs.${name} }}\n`), name);
   }
