@@ -36,8 +36,10 @@ test('every reviewer job records its usage however it ended, without failing the
 
 test('the cost job runs after the verdict, even when the run was cancelled, and holds no more than it needs', () => {
   const workflow = reviewWorkflow();
-  const { cost } = jobsOf(workflow);
-  assert.match(cost, /\n {4}needs: \[claude, codex, verdict\]\n/u);
+  const jobs = jobsOf(workflow);
+  const { cost } = jobs;
+  // It prices only the reviewers it needs, so it needs every one.
+  assert.deepEqual(cost.match(/\n {4}needs: \[(.*)\]\n/u)[1].split(', '), [...reviewerJobs(jobs), 'verdict']);
   assert.ok(cost.includes(`\n      ${recorded.replace(' && (', ' &&\n      (')} &&\n`));
   assert.match(cost, /contains\(needs\.\*\.result, 'cancelled'\)/u);
   assert.match(cost, /\n {4}permissions:\n {6}contents: read\n(?: {6}#.*\n)* {6}pull-requests: write\n {4}steps:/u);

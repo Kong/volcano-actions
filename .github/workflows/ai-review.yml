@@ -25,8 +25,9 @@
 # the verdict job hands off with its own token, which GitHub refuses, so its
 # comment says the review goes on.
 #
-# To add a provider, add a job like `claude` and `codex`, list it in
-# `verdict.needs`, and add its credential secret to workflow_call.
+# To add a provider, add a job like `claude` and `codex` that ends with the
+# usage step and its upload, list it in `verdict.needs` and `cost.needs`, and
+# add its credential secret to workflow_call.
 #
 # - The policy (.github/actions/ai-review/policy.md) defines each level by
 #   what happens if it is not fixed and never says which levels fail, so a

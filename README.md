@@ -94,8 +94,10 @@ any number of reviewers:
    output to `ai-review-<job ID>.json` and uploads that file alone as the
    artifact `ai-review-<job ID>`, which the verdict job downloads. A job
    output would reach publish through an environment variable, which holds at
-   most 128 KiB.
-2. List the job in the `verdict` job's `needs`.
+   most 128 KiB. It ends, like them, with the action's `step: usage` and the
+   upload of `ai-review-usage-<job ID>`, which the cost job downloads.
+2. List the job in the `needs` of the `verdict` and `cost` jobs; the cost job
+   prices only the reviewers it needs.
 3. Add its credential to the workflow's secrets, with `required: false`, and
    to the caller stubs below.
 4. Add the job to the provider list in
