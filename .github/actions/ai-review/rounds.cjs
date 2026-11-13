@@ -160,17 +160,20 @@ const draftPermission =
 const forbidden = (error) =>
   (Array.isArray(error.errors) && error.errors.some((e) => e?.type === 'FORBIDDEN')) ||
   /Resource not accessible by integration/u.test(error.message ?? '');
+// The error, and for a refusal the permissions the token lacks.
+const why = (error) => (forbidden(error) ? `${error.message} ${draftPermission}` : error.message);
 
 // Moves the PR to draft, which start() never reviews, and asks the author to
 // re-assess the approach, once the PR and its verdict are read again. The
 // conversion takes GraphQL; a failure only warns, and the comment then says
-// the review goes on. Returns whether the PR moved to draft, or null when it
-// was not handed off.
+// the review goes on. Returns null when it was not handed off, or else
+// whether the PR moved to draft and the conversion's error when it did not.
 async function handOff({ github, context, core }, record) {
   const sha = context.payload.pull_request.head.sha;
   const pull = await stillFailing({ github, context, core }, sha);
   if (!pull) return null;
   let drafted = false;
+  let refused = null;
   try {
     await github.graphql(
       'mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }',
@@ -178,8 +181,8 @@ async function handOff({ github, context, core }, record) {
     );
     drafted = true;
   } catch (error) {
-    const why = forbidden(error) ? ` ${draftPermission}` : '';
-    core.warning(`Could not move the PR back to draft after ${record.count} failing rounds: ${error.message}${why}`);
+    refused = error;
+    core.warning(`Could not move the PR back to draft after ${record.count} failing rounds: ${why(error)}`);
   }
   try {
     if (!(await alreadyAsked(github, context, pull.number, record.since, drafted))) {
@@ -189,7 +192,7 @@ async function handOff({ github, context, core }, record) {
   } catch (error) {
     core.warning(`Could not ask the author to re-assess the PR: ${error.message}`);
   }
-  return drafted;
+  return { drafted, error: refused };
 }
 
 // Whether the summary's rounds record reaches the limit at this head in the
@@ -213,8 +216,9 @@ async function handoffStep({ github, context, core }) {
     );
     return;
   }
-  if ((await handOff({ github, context, core }, record)) === false) {
-    core.setFailed(`Could not move the PR back to draft after ${record.count} failing rounds. ${draftPermission}`);
+  const result = await handOff({ github, context, core }, record);
+  if (result && !result.drafted) {
+    core.setFailed(`Could not move the PR back to draft after ${record.count} failing rounds: ${why(result.error)}`);
   }
 }
 

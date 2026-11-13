@@ -68,8 +68,17 @@ test('the handoff step fails, naming the permission, when its token cannot conve
   assert.equal(k.failures.length, 1);
   assert.match(
     k.failures[0],
-    /^Could not move the PR back to draft after 3 failing rounds\. Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the action's handoff step in a job of its own with those and statuses: read\.$/u,
+    /^Could not move the PR back to draft after 3 failing rounds: Request failed due to following response errors:\n - Resource not accessible by integration Converting a PR to draft takes a GITHUB_TOKEN with contents: write and pull-requests: write; run the action's handoff step in a job of its own with those and statuses: read\.$/u,
   );
+});
+
+test('the handoff step fails with the error itself when GitHub fails the conversion otherwise', async () => {
+  const { k, handOff } = await runHandoff({
+    comments: [summary({ since: opened, count: 3, sha })],
+    failDraft: 'outage',
+  });
+  assert.match(handOff.body, /could not move this PR back to draft/u);
+  assert.deepEqual(k.failures, ['Could not move the PR back to draft after 3 failing rounds: Server Error']);
 });
 
 test('the handoff step hands off only a head whose summary records the limit', async () => {
