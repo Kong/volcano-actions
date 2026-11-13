@@ -102,6 +102,38 @@ test('a run counts as cancelled when any reviewer was, and as partial when any s
   assert.deepEqual([r.state, r.partial, r.by], ['cancelled', true, { Claude: 1, Codex: 0.5 }]);
 });
 
+test('only a reviewer that stopped early shows a lower bound in its round', () => {
+  const spend = [
+    { reviewer: 'Claude', state: 'finished', partial: false, known: true, cost: 1 },
+    { reviewer: 'Codex', state: 'cancelled', partial: true, known: true, cost: 0.5 },
+  ];
+  const ledger = ledgerOf(null);
+  ledger.rounds['9/1'] = roundOf(sha, spend, '2026-11-11T10:00:00Z');
+  assert.match(costBody(ledger), /\| cancelled \| \$1\.00 \| ~\$0\.50 \| ~\$1\.50 \|/u);
+});
+
+test('a stale write that drops rounds this writer saw is undone, not just for its own round', async () => {
+  const c = commentsClient();
+  const ctx = context();
+  // Another writer recorded 8/1 and has already stopped checking.
+  const earlier = ledgerOf(null);
+  earlier.rounds['8/1'] = round('finished', 2, 2, '2026-11-11T09:00:00Z');
+  await c.github.rest.issues.createComment({ ...ctx.repo, issue_number: 7, body: costBody(earlier) });
+  // A third writer read the ledger before 8/1 was there, and writes after this run.
+  const staleLedger = ledgerOf(null);
+  staleLedger.rounds['10/1'] = round('finished', 3, 3, '2026-11-11T11:00:00Z');
+  let clobbered = false;
+  const wait = () => {
+    if (clobbered) return Promise.resolve();
+    clobbered = true;
+    return c.github.rest.issues.updateComment({ comment_id: c.comments()[0].id, body: costBody(staleLedger) });
+  };
+  await recordRound({ github: c.github, context: ctx }, '9/1', round('finished', 1, 1, '2026-11-11T10:00:00Z'), {
+    wait,
+  });
+  assert.deepEqual(Object.keys(ledgerOf(c.comments()[0]).rounds).toSorted(), ['10/1', '8/1', '9/1']);
+});
+
 test('a write from a stale read cannot drop a round for good', async () => {
   const c = commentsClient();
   const ctx = context();

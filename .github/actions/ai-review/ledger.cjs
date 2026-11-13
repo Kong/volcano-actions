@@ -69,12 +69,14 @@ function ledgerOf(comment) {
 
 // A run's entry: its head, whether it finished, and each reviewer's cost.
 // A run counts as cancelled when any of its reviewers was. Its cost is a
-// lower bound when a reviewer stopped early or its cost is unknown.
+// lower bound when a reviewer stopped early or its cost is unknown; `stopped`
+// names the reviewers that stopped early, whose own costs are lower bounds.
 const roundOf = (sha, spend, at) => ({
   sha,
   at,
   state: spend.some((r) => r.state === 'cancelled') ? 'cancelled' : 'finished',
   partial: spend.some((r) => r.partial || !r.known),
+  stopped: spend.filter((r) => r.partial).map((r) => r.reviewer),
   unknown: spend.filter((r) => !r.known).map((r) => r.reviewer),
   by: Object.fromEntries(spend.map((r) => [r.reviewer, Number(r.cost.toFixed(4))])),
 });
@@ -113,10 +115,13 @@ function totals(ledger) {
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-// A reviewer's cost in a round: blank when it did not run, `?` when unknown.
+// A reviewer's cost in a round: blank when it did not run, `?` when unknown,
+// and a lower bound when it stopped early. A round written before `stopped`
+// was recorded marks every reviewer as its total does.
 function cell(round, name) {
   if (!(name in round.by)) return '';
-  return round.unknown?.includes(name) ? '?' : dollars(round.by[name], round.partial);
+  if (round.unknown?.includes(name)) return '?';
+  return dollars(round.by[name], round.stopped?.includes(name) ?? round.partial);
 }
 
 // The recent rounds, newest first, as a table.
@@ -217,13 +222,17 @@ const settle = 20_000;
 
 // Adds this run's round to the PR's cost comment. GitHub cannot update a
 // comment only if it is unchanged, so two runs can write at once, as when a
-// push cancels a review while another run records, and the later write can
-// drop the earlier one's round. Every writer writes only from a fresh read,
-// once, waits until any write from an older read has landed, and reads again,
-// writing again until its round is there. A round already recorded, as by a
-// re-run of this step, is left as it is.
+// push cancels a review while another run records, and a later write can
+// drop rounds an earlier one wrote, even rounds whose writers already saw
+// them and stopped. Every writer writes only from a fresh read, once, waits
+// until any write from an older read has landed, and reads again. It keeps
+// every round it has seen, its own included, and writes again until all of
+// them are there, so a round dropped after its writer stopped comes back
+// through any writer still running that saw it. A round already recorded, as
+// by a re-run of this step, is left as it is.
 async function recordRound({ github, context }, key, round, timing = {}) {
   const { wait = pause, now = Date.now } = timing;
+  const seen = { [key]: round };
   let failed;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const found = await costComments(github, context, context.payload.pull_request.number);
@@ -231,8 +240,10 @@ async function recordRound({ github, context }, key, round, timing = {}) {
     const comments = await fresh(github, context, found);
     if (!comments) continue;
     const ledger = merged(comments);
-    if (has(ledger, key) && comments.length === 1) return;
-    if (!has(ledger, key)) ledger.rounds[key] = round;
+    const missing = Object.keys(seen).filter((k) => !has(ledger, k));
+    Object.assign(seen, ledger.rounds);
+    if (missing.length === 0 && comments.length === 1) return;
+    for (const k of missing) ledger.rounds[k] = seen[k];
     if (now() - readAt <= staleAfter) {
       // A failed write may still have landed; the next read tells.
       try {
