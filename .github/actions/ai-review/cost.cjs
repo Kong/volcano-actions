@@ -71,6 +71,8 @@ async function send(context, core, spend) {
   const run = {
     repo: `${context.repo.owner}/${context.repo.repo}`,
     pr: context.payload.pull_request.number,
+    author: context.payload.pull_request.user?.login,
+    sha: context.payload.pull_request.head.sha,
     runId: context.runId,
     attempt: context.runAttempt,
     url: runUrl(context),

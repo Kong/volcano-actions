@@ -97,7 +97,7 @@ test('the export sends metrics and logs with the run and each reviewer', async (
     sent.push({ url, headers: init.headers, body: JSON.parse(init.body) });
     return { ok: true, text: () => Promise.resolve('{}') };
   });
-  const run = { repo: 'Kong/volcano-hosting', pr: 7, runId: 9, attempt: 1, url: 'u' };
+  const run = { repo: 'Kong/volcano-hosting', pr: 7, author: 'author', sha, runId: 9, attempt: 1, url: 'u' };
   const spend = runSpend(needs('success', 'cancelled'), usageDir(t), true);
   await exportSpend({ endpoint: 'https://otlp.example/', headers: 'Authorization=Bearer t', run, spend, fetchImpl });
   assert.deepEqual(
@@ -122,18 +122,18 @@ test('the export sends metrics and logs with the run and each reviewer', async (
   assert.equal(attrs(costPoints[0])['vcs.change.id'], '7');
   const logs = sent[1].body.resourceLogs[0];
   assert.equal(logs.scopeLogs[0].logRecords.length, 2);
-  // A PR is identified by its number and run URL only: no author or head commit.
   for (const record of logs.scopeLogs[0].logRecords) {
-    assert.equal(attrs(record)['vcs.change.id'], '7');
-    assert.equal(attrs(record)['cicd.pipeline.run.url.full'], 'u');
-    assert.ok(!('github.pr.author' in attrs(record)));
-    assert.ok(!('vcs.ref.head.revision' in attrs(record)));
+    assert.equal(attrs(record)['github.pr.author'], 'author');
+    assert.equal(attrs(record)['vcs.ref.head.revision'], sha);
   }
   // Codex's whole-dollar cost is a double like Claude's, so the attribute keeps one type.
   assert.deepEqual(
     logs.scopeLogs[0].logRecords.map((r) => r.attributes.find((a) => a.key === 'ai_review.cost.usd').value),
     [{ doubleValue: 6.4 }, { doubleValue: 3 }],
   );
+  // Metrics carry no author or head, so their series stay few.
+  const points = metrics.flatMap((metric) => metric.sum.dataPoints.map(attrs));
+  assert.ok(points.every((a) => !('github.pr.author' in a) && !('vcs.ref.head.revision' in a)));
   const resource = attrs(logs.resource);
   assert.equal(resource['service.name'], 'gha-ai-review');
   // Each run attempt is its own writer, so concurrent runs never share a stream.
@@ -229,7 +229,7 @@ test('the cost step records nothing when no review ran', async (t) => {
 test('the export reports what an accepting collector rejected', async (t) => {
   const answers = ['{"partialSuccess":{"rejectedDataPoints":"3","errorMessage":"bad delta"}}', '{"partialSuccess":{}}'];
   const fetchImpl = resolved(() => ({ ok: true, text: () => Promise.resolve(answers.shift()) }));
-  const run = { repo: 'Kong/volcano-hosting', pr: 7, runId: 9, attempt: 1, url: 'u' };
+  const run = { repo: 'Kong/volcano-hosting', pr: 7, sha, runId: 9, attempt: 1, url: 'u' };
   const spend = runSpend(needs('success'), usageDir(t), false);
   assert.deepEqual(await exportSpend({ endpoint: 'https://otlp.example', headers: '', run, spend, fetchImpl }), [
     'https://otlp.example/v1/metrics rejected 3 item(s): bad delta',
