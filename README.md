@@ -202,7 +202,7 @@ To add it to a repository:
          codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
      hand-off:
        needs: ai-review
-       if: needs.ai-review.outputs.hand-off == 'true'
+       if: ${{ !cancelled() && needs.ai-review.outputs.hand-off == 'true' }}
        uses: Kong/volcano-actions/.github/workflows/ai-review-hand-off.yml@main
        permissions:
          contents: write
@@ -215,7 +215,11 @@ To add it to a repository:
    token with `contents: write`, so only this job gets one; it never checks
    out the PR and runs nothing but that step. Without it, and without
    `hand_off: true`, the review still asks the author to re-assess, but it
-   cannot move the PR to draft and keeps reviewing each push.
+   cannot move the PR to draft and keeps reviewing each push. The job runs
+   even when a reviewer job failed, since the other reviewers' verdict
+   stands; only a cancelled run skips it. The retarget stub below does not
+   hand off, so a third failing round reached by retargeting the PR only asks
+   the author to re-assess.
 
    And `.github/workflows/ai-review-retarget-override.yml`:
 
@@ -365,7 +369,8 @@ Callers using `@main` receive workflow changes when they merge here. Callers
 pinned to a workflow SHA need a reference update. The workflows pin the
 composite action to a full commit SHA, so action changes, including the
 policy and schema that ship with it, do not roll out until every reference to
-it in `ai-review.yml` and `ai-review-human.yml` is updated.
+it in `ai-review.yml`, `ai-review-human.yml`, and `ai-review-hand-off.yml` is
+updated.
 
 For action changes, merge the implementation first. In a separate PR, update
 the workflows' action pins to the resulting commit on `main`, using the squash

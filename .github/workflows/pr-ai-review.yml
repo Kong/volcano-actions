@@ -25,7 +25,7 @@ jobs:
       codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
   hand-off:
     needs: ai-review
-    if: needs.ai-review.outputs.hand-off == 'true'
+    if: ${{ !cancelled() && needs.ai-review.outputs.hand-off == 'true' }}
     uses: Kong/volcano-actions/.github/workflows/ai-review-hand-off.yml@main
     permissions:
       contents: write
