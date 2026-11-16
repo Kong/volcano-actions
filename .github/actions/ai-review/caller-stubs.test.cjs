@@ -23,7 +23,7 @@ const stubs = {
     name: 'AI Review',
     job: 'ai-review',
     types: 'opened, synchronize, reopened, ready_for_review',
-    with: '    with:\n      hand_off: true\n',
+    with: "    with:\n      # Sends each review's tokens and cost to Kong's Dash0.\n      otlp_endpoint: https://ingress.us-west-2.aws.dash0.com\n      hand_off: true\n",
     // The opt-in job that moves a PR whose review has not converged back
     // to draft, which takes contents: write. A failed reviewer job fails
     // the called workflow, whose verdict still stands, so the job runs
@@ -36,6 +36,7 @@ const stubs = {
     job: 'retarget-or-override',
     types: 'edited, labeled',
     if: `github.event.changes.base || github.event.label.name == '${overrideLabel}'`,
+    with: "    with:\n      # Sends each review's tokens and cost to Kong's Dash0.\n      otlp_endpoint: https://ingress.us-west-2.aws.dash0.com\n",
   },
 };
 
@@ -62,7 +63,7 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
       file,
     );
     const review =
-      '    permissions:\n      actions: write\n      contents: read\n      pull-requests: write\n      statuses: write\n    secrets:\n      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}\n      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}\n';
+      '    permissions:\n      actions: write\n      contents: read\n      pull-requests: write\n      statuses: write\n    secrets:\n      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}\n      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}\n      otlp_headers: Authorization=Bearer ${{ secrets.DASH0_INGEST_TOKEN }},Dash0-Dataset=volcano\n';
     assert.ok(stub.endsWith(`\n${review}${want.after ?? ''}`), file);
     assert.doesNotMatch(stub, /concurrency/u, file);
     assert.ok(readme.includes(shown.trim()), `README.md shows ${file}`);
