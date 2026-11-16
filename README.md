@@ -166,10 +166,12 @@ CODEOWNERS line.
 
 To add it to a repository:
 
-1. Make the `ANTHROPIC_CI_API_KEY` and `CODEX_CI_ACCESS_TOKEN` secrets
-   available to the repository's Actions, as organization or repository
-   secrets. The stubs below pass them to the review, which calls Claude with
-   the API key and runs Codex with the ChatGPT workspace access token.
+1. Make the `ANTHROPIC_CI_API_KEY`, `CODEX_CI_ACCESS_TOKEN` and
+   `DASH0_INGEST_TOKEN` secrets available to the repository's Actions, as
+   organization or repository secrets. The stubs below pass them to the
+   review, which calls Claude with the API key, runs Codex with the ChatGPT
+   workspace access token, and sends each review's cost to Dash0 with the
+   ingest token (see [Cost](#cost)).
 2. Protect `main` and require the `ai-review/verdict` status on it, with
    GitHub Actions as the expected source. Otherwise anyone with write access
    can satisfy it by posting a status with their own token.
@@ -193,6 +195,8 @@ To add it to a repository:
      ai-review:
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
        with:
+         # Sends each review's tokens and cost to Kong's Dash0.
+         otlp_endpoint: https://ingress.us-west-2.aws.dash0.com
          hand_off: true
        permissions:
          actions: write
@@ -202,6 +206,7 @@ To add it to a repository:
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
          codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
+         otlp_headers: Authorization=Bearer ${{ secrets.DASH0_INGEST_TOKEN }},Dash0-Dataset=volcano
      hand-off:
        needs: ai-review
        if: ${{ !cancelled() && needs.ai-review.outputs.hand-off == 'true' }}
@@ -239,6 +244,9 @@ To add it to a repository:
      retarget-or-override:
        if: github.event.changes.base || github.event.label.name == 'ai-review-override'
        uses: Kong/volcano-actions/.github/workflows/ai-review.yml@main
+       with:
+         # Sends each review's tokens and cost to Kong's Dash0.
+         otlp_endpoint: https://ingress.us-west-2.aws.dash0.com
        permissions:
          actions: write
          contents: read
@@ -247,6 +255,7 @@ To add it to a repository:
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
          codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
+         otlp_headers: Authorization=Bearer ${{ secrets.DASH0_INGEST_TOKEN }},Dash0-Dataset=volcano
    ```
 
    Every title, body, or label edit fires `edited` or `labeled`. The PR page
@@ -376,21 +385,13 @@ comment with the running cost of the PR's AI reviews, finished and cancelled
 rounds apart. A reviewer on a plan with no per-token bill is priced at its
 tokens' API list price.
 
-To also send each review's tokens and cost to an OpenTelemetry collector,
-pass its OTLP/HTTP base URL and, from a secret, its request headers. Pass
-them in both `ai-review.yml` and `ai-review-retarget-override.yml`:
-
-```yaml
-jobs:
-  ai-review:
-    # uses and permissions as above
-    with:
-      otlp_endpoint: https://ingress.example.com
-    secrets:
-      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
-      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
-      otlp_headers: ${{ secrets.AI_REVIEW_OTLP_HEADERS }}
-```
+The stubs above also send each review's tokens and cost to Kong's Dash0, in
+the `volcano` dataset, by passing an OTLP/HTTP base URL and request headers
+built from the `DASH0_INGEST_TOKEN` secret. Without that secret the export
+fails with a warning and the review is unaffected. To send to another
+OpenTelemetry collector, pass its base URL as `otlp_endpoint` and its headers,
+as `key=value,key=value` from a secret, as `otlp_headers`, in both
+`ai-review.yml` and `ai-review-retarget-override.yml`.
 
 The collector gets metrics under `service.name=gha-ai-review` and one log
 record per reviewer that names the PR, the run, and PR metadata.
