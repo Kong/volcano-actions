@@ -57,6 +57,11 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
   the checkout's credentials. No reviewer job holds a write token; the verdict
   job posts the comments.
 
+The default `allowed_bots` list includes `dependabot[bot]`, `kong[bot]`,
+`kong-volcano-app[bot]`, and `volcano-staging[bot]`. Callers can replace it
+with an explicit list. This permits AI review of their PRs; it does not grant
+approval or merge rights.
+
 One verdict combines every reviewer, and the summary comment reads as a
 single review that names no reviewer or provider, however many ran:
 

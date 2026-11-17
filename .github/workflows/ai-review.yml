@@ -95,7 +95,7 @@ on:
       allowed_bots:
         description: Bots whose PRs are reviewed. Each reviewer job refuses other bots.
         type: string
-        default: dependabot[bot],kong[bot],kong-volcano-app[bot]
+        default: dependabot[bot],kong[bot],kong-volcano-app[bot],volcano-staging[bot]
       hand_off:
         description: True when the caller runs ai-review-hand-off.yml once this workflow's `hand-off` output is 'true', to move a PR whose review has not converged back to draft. The verdict job then leaves the hand-off to it.
         type: boolean
