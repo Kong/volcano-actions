@@ -39,11 +39,7 @@ records the count.
 ### Reviewers
 
 Each reviewer is a job in `ai-review.yml` that runs one provider: today Claude
-(the `claude` job) and OpenAI's Codex (the `codex` job). Claude runs Sonnet
-unless the PR carries the `ai-review-opus` label, which asks for Opus on a
-change that needs the closer read. The `start` step reads the label from the
-live PR, so adding it applies from the next push or a re-run of the last
-review. They review the same
+(the `claude` job) and OpenAI's Codex (the `codex` job). They review the same
 head from the same inputs, under one policy and output schema that ship with
 the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 
@@ -55,6 +51,11 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
   paths; and the reviewer candidates. Its outputs give the reviewer the policy,
   with the caller's `focus` applied, and the schema, along with a copy without
   `maxLength` for providers whose structured outputs reject it.
+- The action's `start` step also picks a model for Claude, as its
+  `claude-model` output: `claude-opus-5-5` when the live PR carries the
+  `ai-review-opus` label, and `claude-sonnet-5-5` otherwise. `ai-review.yml`
+  does not read it yet, so the `claude` job still runs `claude-opus-5-5`
+  whatever the labels say.
 - Each job adds only what its provider needs: how it reads files and returns
   its verdict, and its own hardening. Claude reads the checkouts with no shell.
   Codex reads them in a read-only sandbox with no network, after the job drops
@@ -181,8 +182,6 @@ To add it to a repository:
    "Accept this head's AI review (write access, PR author included)".
    Create the `needs-human-review` label with the description:
    "Hold this PR for a human review, whatever the AI review decides".
-   Create the `ai-review-opus` label with the description:
-   "Review this PR with Claude Opus instead of Sonnet, from the next push".
 4. Add `.github/workflows/ai-review.yml`:
 
    ```yaml
