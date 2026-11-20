@@ -9,6 +9,13 @@ const statusContext = 'ai-review/verdict';
 const humanStatusContext = 'ai-review/human';
 const overrideLabel = 'ai-review-override';
 const humanLabel = 'needs-human-review';
+// The Claude reviewer runs Sonnet unless the PR carries this label, which
+// asks for Opus. start() reads the live PR's labels, so the label applies
+// from the next push or a "Re-run all jobs"; re-running only failed jobs
+// keeps the model start picked before.
+const opusLabel = 'ai-review-opus';
+const claudeModel = 'claude-sonnet-5-5';
+const claudeOpusModel = 'claude-opus-5-5';
 const marker = '<!-- ai-review-verdict -->';
 // Starts the comment that hands a PR to a person after the round limit (see
 // rounds.cjs).
@@ -45,6 +52,9 @@ module.exports = {
   humanStatusContext,
   overrideLabel,
   humanLabel,
+  opusLabel,
+  claudeModel,
+  claudeOpusModel,
   marker,
   roundsMarker,
   costMarker,
