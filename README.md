@@ -39,7 +39,11 @@ records the count.
 ### Reviewers
 
 Each reviewer is a job in `ai-review.yml` that runs one provider: today Claude
-(the `claude` job) and OpenAI's Codex (the `codex` job). They review the same
+(the `claude` job) and OpenAI's Codex (the `codex` job). Claude runs Sonnet
+unless the PR carries the `ai-review-opus` label, which asks for Opus on a
+change that needs the closer read. The `start` step reads the label from the
+live PR, so adding it applies from the next push or a re-run of the last
+review. They review the same
 head from the same inputs, under one policy and output schema that ship with
 the action as `.github/actions/ai-review/policy.md` and `schema.json`.
 
@@ -177,6 +181,8 @@ To add it to a repository:
    "Accept this head's AI review (write access, PR author included)".
    Create the `needs-human-review` label with the description:
    "Hold this PR for a human review, whatever the AI review decides".
+   Create the `ai-review-opus` label with the description:
+   "Review this PR with Claude Opus instead of Sonnet, from the next push".
 4. Add `.github/workflows/ai-review.yml`:
 
    ```yaml
