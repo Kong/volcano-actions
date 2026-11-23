@@ -57,6 +57,8 @@ test('the shared steps upload separate structured reviews and fingerprint the pr
   assert.match(upload, /\n {10}if-no-files-found: error(?:\n|$)/u);
   assert.match(upload, /\n {8}timeout-minutes: \d+\n/u);
   const steps = stepsOf(claude);
+  // Only input digests and the two usage steps may fail quietly.
+  assert.equal(steps.match(/continue-on-error:/gu).length, 3);
   const digest = stepText(claude, '- name: Record review input digests');
   assert.match(digest, /\n {8}if: vars\.AI_REVIEW_COMPARE_OPUS == 'true'\n {8}continue-on-error: true\n/u);
   assert.match(digest, /\n {8}working-directory: \$\{\{ steps\.prepare\.outputs\.inputs \}\}\n/u);

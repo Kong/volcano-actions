@@ -113,7 +113,8 @@ Callers pinned to a workflow commit need a revision that includes this option.
 Both jobs use the same policy, schema, and reasoning effort. Sonnet publishes
 the verdict and human review status. Opus saves its structured review for
 comparison and reports usage through the existing cost job when enabled for
-the repository.
+the repository. The caller's automatic move-to-draft step waits for the
+whole workflow, including Opus and cost reporting.
 
 Leave the variable on for at least a week, with enough artifact retention to
 collect the results. For each PR, use the latest completed run with both
