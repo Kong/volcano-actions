@@ -50,6 +50,11 @@ and `schema.json`.
   paths; and the reviewer candidates. Its outputs give the reviewer the policy,
   with the caller's `focus` applied, and the schema, along with a copy without
   `maxLength` for providers whose structured outputs reject it.
+- The action's `start` step also picks a model for Claude, as its
+  `claude-model` output: `claude-opus-5-5` when the live PR carries the
+  `ai-review-opus` label, and `claude-sonnet-5-5` otherwise. `ai-review.yml`
+  does not read it yet, so the `claude` job still runs `claude-opus-5-5`
+  whatever the labels say.
 - Each job adds only what its provider needs: how it reads files and returns
   its verdict, and its own hardening. Claude reads the checkouts with no shell.
   No reviewer job holds a write token. The verdict job posts the comments.

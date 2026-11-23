@@ -10,6 +10,7 @@
 const prices = {
   // https://platform.claude.com/docs/en/about-claude/pricing
   'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8, basis: 'api' },
+  'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2.5, cacheWrite1h: 4, basis: 'api' },
   // https://openai.com/index/introducing-gpt-6-1-sol/
   'gpt-6.1-sol': {
     input: 2,
