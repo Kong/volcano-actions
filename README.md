@@ -7,9 +7,9 @@ Shared GitHub Actions and reusable workflows for Volcano repositories. The
 ## AI review
 
 `.github/workflows/ai-review.yml` reviews each push to a same-repository pull
-request with several AI reviewers and reports one `ai-review/verdict` commit
-status on the reviewed head. P0-P2 findings fail it, except a P2 the author
-deferred, which goes to a person. A human collaborator with write or admin
+request and reports one `ai-review/verdict` commit status on the reviewed
+head. P0-P2 findings fail it, except a P2 the author deferred, which goes to
+a person. A human collaborator with write or admin
 access, including the PR author, can accept one head with the
 `ai-review-override` label. This includes fork PRs, which the AI review does
 not run on. The label is removed after processing. Each new commit needs its
@@ -38,10 +38,9 @@ records the count.
 
 ### Reviewers
 
-Each reviewer is a job in `ai-review.yml` that runs one provider: today Claude
-(the `claude` job) and OpenAI's Codex (the `codex` job). They review the same
-head from the same inputs, under one policy and output schema that ship with
-the action as `.github/actions/ai-review/policy.md` and `schema.json`.
+The `claude` job in `ai-review.yml` runs Claude Sonnet 5.5. The review policy
+and output schema ship with the action as `.github/actions/ai-review/policy.md`
+and `schema.json`.
 
 - The action's `prepare` step builds the inputs in a checkout of the base
   branch: the diff, commit messages, and description; the comments the
@@ -51,16 +50,9 @@ the action as `.github/actions/ai-review/policy.md` and `schema.json`.
   paths; and the reviewer candidates. Its outputs give the reviewer the policy,
   with the caller's `focus` applied, and the schema, along with a copy without
   `maxLength` for providers whose structured outputs reject it.
-- The action's `start` step also picks a model for Claude, as its
-  `claude-model` output: `claude-opus-5-5` when the live PR carries the
-  `ai-review-opus` label, and `claude-sonnet-5-5` otherwise. `ai-review.yml`
-  does not read it yet, so the `claude` job still runs `claude-opus-5-5`
-  whatever the labels say.
 - Each job adds only what its provider needs: how it reads files and returns
   its verdict, and its own hardening. Claude reads the checkouts with no shell.
-  Codex reads them in a read-only sandbox with no network, after the job drops
-  the checkout's credentials. No reviewer job holds a write token; the verdict
-  job posts the comments.
+  No reviewer job holds a write token. The verdict job posts the comments.
 
 One verdict combines every reviewer, and the summary comment reads as a
 single review that names no reviewer or provider, however many ran:
@@ -89,10 +81,10 @@ single review that names no reviewer or provider, however many ran:
 To add a provider, change the workflow and the cost tables; the verdict reads
 any number of reviewers:
 
-1. Add a job to `ai-review.yml` like `claude` and `codex`. It requires its
-   credential, refuses bots outside `allowed_bots` (start leaves bots to the
-   reviewers), checks out the base, runs the action with `step: prepare`, and then
-   runs the provider with prepare's `policy` and `schema` (or
+1. Add a job to `ai-review.yml` like `claude`. It requires its credential,
+   refuses bots outside `allowed_bots` (start leaves bots to the reviewers),
+   checks out the base, runs the action with `step: prepare`, and then runs
+   the provider with prepare's `policy` and `schema` (or
    `schema-without-max-length`) and its own prompt lines. Its outputs are
    `reviewer`, the name the run log uses; `model`, the model its inline
    comments name; and `candidates`, from prepare. It writes its structured
@@ -110,7 +102,7 @@ any number of reviewers:
    reviewer job to these rules.
 5. Add its `model` to `.github/actions/ai-review/prices.cjs`; a test fails
    while any reviewer's model has no price. If its CLI writes a session log
-   unlike Claude Code's or Codex's, add a reader for it to `usage.cjs`.
+   unlike Claude Code's, add a reader for it to `usage.cjs`.
 
 ### Human review
 
@@ -171,10 +163,13 @@ CODEOWNERS line.
 
 To add it to a repository:
 
-1. Make the `ANTHROPIC_CI_API_KEY` and `CODEX_CI_ACCESS_TOKEN` secrets
-   available to the repository's Actions, as organization or repository
-   secrets. The stubs below pass them to the review, which calls Claude with
-   the API key and runs Codex with the ChatGPT workspace access token.
+1. Make the `ANTHROPIC_CI_API_KEY` secret available to the repository's Actions
+   as an organization or repository secret. The stubs below pass it to the
+   Claude reviewer.
+
+   Existing caller workflows can still pass the deprecated `codex_access_token`
+   field while they migrate to these stubs.
+
 2. Protect `main` and require the `ai-review/verdict` status on it, with
    GitHub Actions as the expected source. Otherwise anyone with write access
    can satisfy it by posting a status with their own token.
@@ -206,7 +201,6 @@ To add it to a repository:
          statuses: write
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
-         codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
      hand-off:
        needs: ai-review
        if: ${{ !cancelled() && needs.ai-review.outputs.hand-off == 'true' }}
@@ -251,7 +245,6 @@ To add it to a repository:
          statuses: write
        secrets:
          anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
-         codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
    ```
 
    Every title, body, or label edit fires `edited` or `labeled`. The PR page
@@ -393,7 +386,6 @@ jobs:
       otlp_endpoint: https://ingress.example.com
     secrets:
       anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
-      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
       otlp_headers: ${{ secrets.AI_REVIEW_OTLP_HEADERS }}
 ```
 

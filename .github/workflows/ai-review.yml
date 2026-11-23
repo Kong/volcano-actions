@@ -2,8 +2,8 @@
 # pull_request_target workflow (see README.md). Each reviewer job below reviews
 # every push to a same-repository PR, and one verdict combines them as the
 # `ai-review/verdict` commit status on the reviewed head. Findings are ranked
-# P0-P3, as Codex review ranks them; a P0-P2 finding from any reviewer fails
-# it, unless it is a P2 the author deferred. It also reports `ai-review/human`,
+# P0-P3. A P0-P2 finding fails the verdict unless it is a P2 the author
+# deferred. The workflow also reports `ai-review/human`,
 # which waits for a person's approval when a reviewer, a deferral, a reserved
 # path, the needs-human-review label, an override, or a fork calls for one, and
 # passes otherwise. A repository that requires it
@@ -25,9 +25,9 @@
 # the verdict job hands off with its own token, which GitHub refuses, so its
 # comment says the review goes on.
 #
-# To add a provider, add a job like `claude` and `codex` that ends with the
-# usage step and its upload, list it in `verdict.needs` and `cost.needs`, and
-# add its credential secret to workflow_call.
+# To add a provider, add a job like `claude` that ends with the usage step and
+# its upload, list it in `verdict.needs` and `cost.needs`, and add its
+# credential secret to workflow_call.
 #
 # - The policy (.github/actions/ai-review/policy.md) defines each level by
 #   what happens if it is not fixed and never says which levels fail, so a
@@ -54,14 +54,10 @@
 #   Its instructions and hooks come from the base and its MCP servers only from
 #   the action, so the PR cannot instruct its reviewer or run code on this
 #   runner.
-# - The codex job gives Codex the same prepared inputs in a read-only sandbox
-#   with no network and no write token, and drops the checkout's credentials
-#   before Codex starts, since it can read any file on the runner.
 # - Each reviewer job uploads only its structured output, as the artifact
 #   `ai-review-<job ID>`, and the verdict job downloads them all. A job output
 #   would reach publish through an environment variable, which holds at most
-#   128 KiB, and Codex's output has no length limit. A missing or unreadable
-#   output leaves that review incomplete.
+#   128 KiB. A missing or unreadable output leaves that review incomplete.
 # - Statuses are per-SHA, so skipped runs never overwrite a verdict, a failed
 #   review is `error`, and a cancelled one stays `pending`.
 # - Each reviewer job also records what it spent, however it ended, as token
@@ -113,7 +109,7 @@ on:
         description: The Anthropic API key the claude job calls Claude with. Every caller passes it; the claude job fails without it.
         required: false
       codex_access_token:
-        description: The ChatGPT workspace access token the codex job runs Codex with. Every caller passes it; the codex job fails without it.
+        description: Deprecated compatibility input for older caller workflows.
         required: false
       otlp_headers:
         description: The collector's request headers as `key=value,key=value`, as OTEL_EXPORTER_OTLP_HEADERS takes them, for `otlp_endpoint`.
@@ -157,7 +153,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: start
 
@@ -174,7 +170,7 @@ jobs:
     outputs:
       reviewer: Claude
       # The verdict job names it in the footer of each inline comment.
-      model: claude-opus-5-5
+      model: claude-sonnet-5-5
       candidates: ${{ steps.prepare.outputs.candidates }}
     steps:
       # A required secret that is unset fails the run before start, which
@@ -204,7 +200,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -250,7 +246,7 @@ jobs:
             none, and decide human_review for the change at this head.
           # The schema rides in single quotes; the action's tests keep quotes out of it.
           claude_args: |
-            --model claude-opus-5-5
+            --model claude-sonnet-5-5
             --effort xhigh
             --json-schema '${{ steps.prepare.outputs.schema }}'
             --add-dir ${{ steps.prepare.outputs.inputs }}
@@ -275,12 +271,12 @@ jobs:
       # reports what it spent. A public repository records usage only for a
       # collector, since its artifacts are public.
       - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         continue-on-error: true
         with:
           step: usage
           provider: claude
-          model: claude-opus-5-5
+          model: claude-sonnet-5-5
           usage-file: ${{ runner.temp }}/ai-review-usage-claude.json
       - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -292,167 +288,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  codex:
-    needs: start
-    if: needs.start.outputs.review == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      # Prepare reads the PR's description and inline comments.
-      pull-requests: read
-    outputs:
-      reviewer: Codex
-      model: gpt-6.1-sol
-      candidates: ${{ steps.prepare.outputs.candidates }}
-    steps:
-      # A missing credential fails this job, which leaves the verdict to the
-      # other reviewers.
-      - name: Require the credential
-        env:
-          KEY_SET: ${{ secrets.codex_access_token != '' }}
-        run: |
-          if [ "$KEY_SET" != true ]; then
-            echo "::error::The caller must pass the codex_access_token secret, for example from CODEX_CI_ACCESS_TOKEN."
-            exit 1
-          fi
-      # start() leaves bots to the reviewers. This matches allowed_bots as the
-      # claude job's action does: `*` allows every bot, names ignore case, and
-      # the [bot] suffix is optional.
-      - name: Require an allowed bot
-        if: endsWith(github.actor, '[bot]')
-        env:
-          ACTOR: ${{ github.actor }}
-          ALLOWED: ${{ inputs.allowed_bots }}
-        run: |
-          # Bot names hold no whitespace, so a multiline list splits like one line.
-          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'; }
-          actor=$(lower "$ACTOR")
-          IFS=, read -ra bots <<< "$(lower "$ALLOWED")"
-          for bot in "${bots[@]}"; do
-            [ "$bot" = '*' ] && exit 0
-            [ "${bot%"[bot]"}[bot]" = "$actor" ] && exit 0
-          done
-          echo "::error::$ACTOR is not in allowed_bots."
-          exit 1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          fetch-depth: 0
-          # Prepare fetches the head once the PR has moved past it.
-          persist-credentials: true
-      # Writes the same inputs as the claude job, before the credentials go.
-      - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
-        with:
-          step: prepare
-          focus: ${{ inputs.focus }}
-      # Codex can read any file on the runner, so the checkout's token goes
-      # before it starts.
-      - name: Drop the checkout credentials
-        run: |
-          git config --local --name-only --get-regexp '^includeif\.' | while read -r key; do
-            git config --local --unset-all "$key"
-          done
-          rm -f "$RUNNER_TEMP"/git-credentials-*.config
-          git config --local --unset-all http.https://github.com/.extraheader || true
-      # codex-action authenticates only with an API key, so the job runs the
-      # CLI itself. Its sandbox needs the unprivileged user namespaces that
-      # GitHub's Ubuntu image restricts. Then the runner gives up sudo, as
-      # codex-action's drop-sudo did, since Codex holds the token.
-      - name: Install Codex
-        env:
-          CODEX_VERSION: 0.162.1
-        run: |
-          npm install -g "@openai/codex@$CODEX_VERSION"
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          sudo rm -f /etc/sudoers.d/runner
-          if sudo -n true 2>/dev/null; then
-            echo "::error::The runner still has sudo."
-            exit 1
-          fi
-      # Codex's commands see only a fresh /proc, and so none of this job's
-      # processes, unless the sandbox cannot mount one: then it silently keeps
-      # the host's, where the token sits in the environment of Codex itself.
-      # A canary named like a token takes the token's place, in a shell and
-      # Codex both started with it, as the review step's are. `exit` keeps
-      # bash from exec'ing Codex in its place.
-      - name: Check that Codex's commands cannot read its environment
-        run: |
-          canary=$(openssl rand -hex 16)
-          errors="$RUNNER_TEMP/codex-sandbox-errors.txt"
-          seen=$(CANARY_TOKEN=$canary bash -c "codex -c 'shell_environment_policy.ignore_default_excludes=false' \
-            sandbox -P ':read-only' -- sh -c 'echo sandboxed; cat /proc/[0-9]*/environ'; exit \$?" 2>"$errors" | tr '\0' '\n' || true)
-          case "$seen" in
-            *"$canary"*) echo "::error::Codex's sandboxed commands can read the environment Codex runs in." && exit 1 ;;
-            *sandboxed*) ;;
-            *) tail -n 20 "$errors" && echo "::error::Codex's sandbox did not run." && exit 1 ;;
-          esac
-      - id: codex
-        # A job timeout reports `cancelled` and would leave the head pending,
-        # where no override applies; a step timeout fails the job instead.
-        timeout-minutes: 40
-        env:
-          CODEX_ACCESS_TOKEN: ${{ secrets.codex_access_token }}
-          # Named, so a model change shows in review rather than with a CLI bump.
-          MODEL: gpt-6.1-sol
-          # Structured outputs reject maxLength; publish caps the lengths instead.
-          SCHEMA: ${{ steps.prepare.outputs.schema-without-max-length }}
-          REVIEW: ${{ runner.temp }}/ai-review-codex.json
-          PROMPT: |
-            ${{ steps.prepare.outputs.policy }}
-
-            The working directory's AGENTS.md files are the repository's
-            instructions. Use only commands that read, such as rg, cat, sed,
-            and git log or git show; run no tests, builds, or installs.
-
-            Your final message is the verdict for this exact head SHA, as JSON
-            that matches the output schema. List every finding that applies to
-            the current diff. Return an empty findings list if there are none,
-            and decide human_review for the change at this head.
-        # Commands Codex runs get no writes, no network, and no variable named
-        # like a key, secret, or token, since Codex holds the access token.
-        # Codex keeps its session log, which the usage step reads token counts
-        # from; the log stays on the runner.
-        run: |
-          printf '%s' "$SCHEMA" > "$RUNNER_TEMP/codex-schema.json"
-          printf '%s' "$PROMPT" | codex exec --skip-git-repo-check \
-            --model "$MODEL" \
-            -c 'model_reasoning_effort="xhigh"' \
-            -c 'default_permissions=":read-only"' \
-            -c 'shell_environment_policy.ignore_default_excludes=false' \
-            --output-schema "$RUNNER_TEMP/codex-schema.json" \
-            -o "$REVIEW" -
-      # A step timeout fails the job rather than cancelling it.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        timeout-minutes: 2
-        with:
-          name: ai-review-codex
-          path: ${{ runner.temp }}/ai-review-codex.json
-          if-no-files-found: error
-      # Runs however the review ended, so a cancelled or failed review still
-      # reports what it spent. A public repository records usage only for a
-      # collector, since its artifacts are public.
-      - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
-        continue-on-error: true
-        with:
-          step: usage
-          provider: codex
-          model: gpt-6.1-sol
-          usage-file: ${{ runner.temp }}/ai-review-usage-codex.json
-      - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        timeout-minutes: 2
-        continue-on-error: true
-        with:
-          name: ai-review-usage-codex
-          path: ${{ runner.temp }}/ai-review-usage-codex.json
-          if-no-files-found: warn
-          retention-days: 1
-
   verdict:
-    needs: [claude, codex]
+    needs: [claude]
     # Runs once every reviewer job ends. A job-level `if` also sees start's
     # result in `needs`, so this passes whenever start succeeded or failed.
     # publish sets nothing when every reviewer was skipped or cancelled: a
@@ -481,7 +318,7 @@ jobs:
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
       - id: publish
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
@@ -490,7 +327,7 @@ jobs:
           hand-off: ${{ inputs.hand_off && 'job' || '' }}
 
   cost:
-    needs: [claude, codex, verdict]
+    needs: [claude, verdict]
     # Runs once the verdict is out, including when a newer push cancelled the
     # run, so cancelled rounds are counted too. A public repository runs it
     # only for a collector.
@@ -514,7 +351,7 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/ai-review-usage
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+      - uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: cost
           reviews: ${{ toJSON(needs) }}
@@ -535,6 +372,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+      - uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: override
