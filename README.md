@@ -88,8 +88,9 @@ any number of reviewers:
    `schema-without-max-length`) and its own prompt lines. Its outputs are
    `reviewer`, the name the run log uses; `model`, the model its inline
    comments name; and `candidates`, from prepare. It writes its structured
-   output to `ai-review-<job ID>.json` and uploads that file alone as the
-   artifact `ai-review-<job ID>`. Add it to the verdict job's artifact download.
+   output to `ai-review-<job ID>.json` in an artifact named
+   `ai-review-<job ID>`. Download each required review's artifact into the
+   verdict job's output directory.
    A job output would reach publish through an environment variable, which holds at
    most 128 KiB. It ends, like them, with the action's `step: usage` and the
    upload of `ai-review-usage-<job ID>`, which the cost job downloads.
@@ -97,9 +98,8 @@ any number of reviewers:
    prices only the reviewers it needs.
 3. Add its credential to the workflow's secrets, with `required: false`, and
    to the caller stubs below.
-4. Add the job to the provider list in
-   `.github/actions/ai-review/reviewer-jobs.test.cjs`, whose tests hold every
-   reviewer job to these rules.
+4. Extend `.github/actions/ai-review/reviewer-jobs.test.cjs` to cover the
+   new job's credential check, permissions, bot allowlist, and unique artifacts.
 5. Add its `model` to `.github/actions/ai-review/prices.cjs`; a test fails
    while any reviewer's model has no price. If its CLI writes a session log
    unlike Claude Code's, add a reader for it to `usage.cjs`.
