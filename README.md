@@ -38,7 +38,7 @@ records the count.
 
 ### Reviewers
 
-The `claude` job in `ai-review.yml` runs Claude Opus 5.5. The review policy
+The `claude` job in `ai-review.yml` runs Claude Sonnet 5.5. The review policy
 and output schema ship with the action as `.github/actions/ai-review/policy.md`
 and `schema.json`.
 
