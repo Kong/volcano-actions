@@ -54,6 +54,7 @@ test("the action's outputs are the script step's, under the same names", () => {
   const names = [...outputs.matchAll(/^ {2}([a-z-]+):\n/gmu)].map((match) => match[1]);
   assert.deepEqual(names, [
     'review',
+    'claude-model',
     'inputs',
     'candidates',
     'policy',

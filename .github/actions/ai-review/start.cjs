@@ -1,6 +1,6 @@
 'use strict';
 
-const { humanStatusContext } = require('./constants.cjs');
+const { humanStatusContext, opusLabel, claudeModel, claudeOpusModel } = require('./constants.cjs');
 const { setStatus, verdictState, canWrite, livePull } = require('./github.cjs');
 
 // Statuses of a run that has not finished, including one waiting on a
@@ -139,6 +139,7 @@ async function start({ github, context, core }) {
   await setStatus(github, context, sha, 'pending', 'The AI review is running.');
   await setStatus(github, context, sha, 'pending', 'Waiting for the AI review.', humanStatusContext);
   core.setOutput('review', 'true');
+  core.setOutput('claude-model', pull.labels?.some((l) => l.name === opusLabel) ? claudeOpusModel : claudeModel);
   try {
     await cancelSuperseded({ github, context, core }, pull);
   } catch (error) {

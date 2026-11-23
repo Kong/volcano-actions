@@ -46,6 +46,9 @@ outputs:
   review:
     description: For start, 'true' when the head needs a review.
     value: ${{ steps.run.outputs.review }}
+  claude-model:
+    description: For start, the model the Claude reviewer runs, Opus when the PR carries the ai-review-opus label and Sonnet otherwise.
+    value: ${{ steps.run.outputs.claude-model }}
   inputs:
     description: For prepare, the directory holding the reviewer's inputs.
     value: ${{ steps.run.outputs.inputs }}
