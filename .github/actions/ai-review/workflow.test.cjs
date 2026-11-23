@@ -37,7 +37,7 @@ test('the review workflows pin one action commit that is on main', () => {
 test('the workflow keeps every reviewer inside its trust boundary', () => {
   const workflow = reviewWorkflow();
   const jobs = jobsOf(workflow);
-  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'codex', 'verdict', 'cost', 'override']);
+  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'verdict', 'cost', 'override']);
 
   // Callers choose the trigger; every job that acts runs only under
   // pull_request_target, which runs the caller's base-branch stub.
@@ -66,12 +66,13 @@ test('the workflow keeps every reviewer inside its trust boundary', () => {
   assert.doesNotMatch(workflow, /id-token/u);
 });
 
-test('every reviewer credential is an optional secret the caller passes', () => {
+test('the workflow accepts the legacy secret without using it', () => {
   const workflow = reviewWorkflow();
   for (const secret of ['anthropic_api_key', 'codex_access_token']) {
     assert.match(workflow, new RegExp(`\\n {6}${secret}:\\n(?: {8}.*\\n)*? {8}required: false\\n`, 'u'), secret);
   }
-  // Codex authenticates with a ChatGPT access token, never an OpenAI API key.
+  assert.equal(workflow.match(/codex_access_token/gu)?.length, 1);
+  assert.doesNotMatch(workflow, /CODEX_ACCESS_TOKEN|@openai\/codex|codex exec/u);
   assert.doesNotMatch(workflow, /openai_api_key|openai-api-key/u);
   assert.doesNotMatch(workflow, /anthropic_(?:federation_rule|organization|service_account|workspace)_id/u);
 });
@@ -259,7 +260,8 @@ test('the pinned action reads the output each reviewer job uploads', async (t) =
   const k = core();
   await pinned.publish({ github: c.github, context: context(), core: k });
   assert.deepEqual(k.warnings, []);
-  assert.deepEqual(c.set(statusContext), [[sha, 'success', 'No P0-P2 findings (2 P3, 0 pre-existing).']]);
+  const findings = reviewerJobs(jobs).length;
+  assert.deepEqual(c.set(statusContext), [[sha, 'success', `No P0-P2 findings (${findings} P3, 0 pre-existing).`]]);
 });
 
 // Reviews run the PR's own copy of their workflow, so the gate runs only from

@@ -32,8 +32,6 @@ test('every reviewer job records its usage however it ended, without failing the
     // Kept only until the cost job has read it.
     assert.match(upload, /\n {10}retention-days: 1\n/u, name);
   }
-  // Codex keeps the session log the usage step reads.
-  assert.doesNotMatch(jobsOf(reviewWorkflow()).codex, /--ephemeral/u);
 });
 
 test('the cost job runs after the verdict, even when the run was cancelled, and holds no more than it needs', () => {

@@ -22,7 +22,6 @@ jobs:
       statuses: write
     secrets:
       anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}
-      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}
   hand-off:
     needs: ai-review
     if: ${{ !cancelled() && needs.ai-review.outputs.hand-off == 'true' }}

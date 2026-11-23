@@ -62,7 +62,7 @@ test('the caller stubs grant what the review needs and set no concurrency', () =
       file,
     );
     const review =
-      '    permissions:\n      actions: write\n      contents: read\n      pull-requests: write\n      statuses: write\n    secrets:\n      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}\n      codex_access_token: ${{ secrets.CODEX_CI_ACCESS_TOKEN }}\n';
+      '    permissions:\n      actions: write\n      contents: read\n      pull-requests: write\n      statuses: write\n    secrets:\n      anthropic_api_key: ${{ secrets.ANTHROPIC_CI_API_KEY }}\n';
     assert.ok(stub.endsWith(`\n${review}${want.after ?? ''}`), file);
     assert.doesNotMatch(stub, /concurrency/u, file);
     assert.ok(readme.includes(shown.trim()), `README.md shows ${file}`);
