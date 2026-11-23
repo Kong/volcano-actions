@@ -19,7 +19,7 @@ const {
   core,
 } = require('./test-helpers.cjs');
 const { tempDir } = require('./test-git.cjs');
-const { reviewWorkflow, action, jobsOf, stepText, reviewerJobs } = require('./test-workflow.cjs');
+const { reviewWorkflow, action, jobsOf } = require('./test-workflow.cjs');
 
 const humanWorkflow = () => readRepo('.github/workflows/ai-review-human.yml');
 const handOffWorkflow = () => readRepo('.github/workflows/ai-review-hand-off.yml');
@@ -37,7 +37,7 @@ test('the review workflows pin one action commit that is on main', () => {
 test('the workflow keeps every reviewer inside its trust boundary', () => {
   const workflow = reviewWorkflow();
   const jobs = jobsOf(workflow);
-  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'verdict', 'cost', 'override']);
+  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'opus', 'verdict', 'cost', 'override']);
 
   // Callers choose the trigger; every job that acts runs only under
   // pull_request_target, which runs the caller's base-branch stub.
@@ -52,8 +52,8 @@ test('the workflow keeps every reviewer inside its trust boundary', () => {
 
   // Forks never reach the jobs that hold the credentials.
   assert.match(jobs.start, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/u);
-  for (const name of reviewerJobs(jobs)) {
-    assert.match(jobs[name], /\n {4}needs: start\n {4}if: needs\.start\.outputs\.review == 'true'\n/u, name);
+  for (const name of ['claude', 'opus']) {
+    assert.match(jobs[name], /\n {4}needs: start\n {4}if: needs\.start\.outputs\.review == 'true'/u, name);
   }
   // The payload's draft flag can be stale; start() checks the live PR.
   assert.doesNotMatch(workflow, /pull_request\.draft/u);
@@ -239,29 +239,22 @@ test('the pinned action matches its schema and the documented override policy', 
   assert.deepEqual(decide(true).reviewer, { login: 'bob', why: 'wrote billing' });
 });
 
-// The verdict job hands the pinned action what each reviewer job uploads.
-test('the pinned action reads the output each reviewer job uploads', async (t) => {
+// The publish action must ignore comparison data even if it sees the file.
+test('the pinned action publishes the Sonnet review and ignores an Opus finding', async (t) => {
   const { pinned } = pinnedAction(t);
-  const jobs = jobsOf(reviewWorkflow());
   const dir = tempDir(t, 'ai-review-outputs-');
-  const needs = {};
-  for (const name of reviewerJobs(jobs)) {
-    const upload = stepText(jobs[name], 'actions/upload-artifact@');
-    const file = upload.match(/\n {10}path: \$\{\{ runner\.temp \}\}\/(\S+)\n/u)[1];
-    // Each in its own file, so the verdict counts them apart.
-    const own = finding('p3', { title: name, path: `internal/${name}.go` });
-    fs.writeFileSync(path.join(dir, file), reviewJson({ findings: [own] }));
-    needs[name] = { result: 'success', outputs: { reviewer: name } };
-  }
+  const sonnet = finding('p3', { title: 'Sonnet', path: 'internal/example.go' });
+  const opus = finding('p1', { title: 'Opus', path: 'internal/example.go' });
+  fs.writeFileSync(path.join(dir, 'ai-review-claude.json'), reviewJson({ findings: [sonnet] }));
+  fs.writeFileSync(path.join(dir, 'ai-review-opus.json'), reviewJson({ findings: [opus] }));
   clearAfter(t, 'REVIEWS', 'REVIEW_OUTPUTS');
-  process.env.REVIEWS = JSON.stringify(needs);
+  process.env.REVIEWS = JSON.stringify({ claude: { result: 'success', outputs: { reviewer: 'Claude' } } });
   process.env.REVIEW_OUTPUTS = dir;
   const c = client();
   const k = core();
   await pinned.publish({ github: c.github, context: context(), core: k });
   assert.deepEqual(k.warnings, []);
-  const findings = reviewerJobs(jobs).length;
-  assert.deepEqual(c.set(statusContext), [[sha, 'success', `No P0-P2 findings (${findings} P3, 0 pre-existing).`]]);
+  assert.deepEqual(c.set(statusContext), [[sha, 'success', 'No P0-P2 findings (1 P3, 0 pre-existing).']]);
 });
 
 // Reviews run the PR's own copy of their workflow, so the gate runs only from

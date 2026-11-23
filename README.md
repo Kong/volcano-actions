@@ -89,8 +89,8 @@ any number of reviewers:
    `reviewer`, the name the run log uses; `model`, the model its inline
    comments name; and `candidates`, from prepare. It writes its structured
    output to `ai-review-<job ID>.json` and uploads that file alone as the
-   artifact `ai-review-<job ID>`, which the verdict job downloads. A job
-   output would reach publish through an environment variable, which holds at
+   artifact `ai-review-<job ID>`. Add it to the verdict job's artifact download.
+   A job output would reach publish through an environment variable, which holds at
    most 128 KiB. It ends, like them, with the action's `step: usage` and the
    upload of `ai-review-usage-<job ID>`, which the cost job downloads.
 2. List the job in the `needs` of the `verdict` and `cost` jobs; the cost job
@@ -103,6 +103,30 @@ any number of reviewers:
 5. Add its `model` to `.github/actions/ai-review/prices.cjs`; a test fails
    while any reviewer's model has no price. If its CLI writes a session log
    unlike Claude Code's, add a reader for it to `usage.cjs`.
+
+### Compare Sonnet and Opus
+
+Set the calling repository's Actions variable `AI_REVIEW_COMPARE_OPUS` to
+`true` to run Claude Opus 5.5 beside Claude Sonnet 5.5 on each eligible head.
+Callers pinned to a workflow commit need a revision that includes this option.
+
+Both jobs use the same policy, schema, and reasoning effort. Sonnet publishes
+the verdict and human review status. Opus saves its structured review for
+comparison and reports usage through the existing cost job when enabled for
+the repository.
+
+Leave the variable on for at least a week, with enough artifact retention to
+collect the results. For each PR, use the latest completed run with both
+`ai-review-claude` and `ai-review-opus` artifacts and matching input digests.
+Download a pair with
+`gh run download RUN_ID --name ai-review-claude --name ai-review-opus`.
+The `.inputs.sha256` files reveal intervening edits or comments that would
+make a pair unsuitable for comparison.
+
+Compare findings by location and rationale, severity, and requests for human
+review. Check disagreements against the diff for missed issues and false
+positives. Compare the model costs separately when recorded. Remove the
+variable to end the bake.
 
 ### Human review
 

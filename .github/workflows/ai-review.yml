@@ -54,10 +54,11 @@
 #   Its instructions and hooks come from the base and its MCP servers only from
 #   the action, so the PR cannot instruct its reviewer or run code on this
 #   runner.
-# - Each reviewer job uploads only its structured output, as the artifact
-#   `ai-review-<job ID>`, and the verdict job downloads them all. A job output
-#   would reach publish through an environment variable, which holds at most
-#   128 KiB. A missing or unreadable output leaves that review incomplete.
+# - Each reviewer job uploads its structured output as the artifact
+#   `ai-review-<job ID>`. During the Opus comparison, each also records hashes
+#   of its prepared inputs. The verdict job downloads only the required review.
+#   A job output would reach publish through an environment variable, which
+#   holds at most 128 KiB. Missing output leaves the review incomplete.
 # - Statuses are per-SHA, so skipped runs never overwrite a verdict, a failed
 #   review is `error`, and a cancelled one stays `pending`.
 # - Each reviewer job also records what it spent, however it ended, as token
@@ -162,17 +163,19 @@ jobs:
     if: needs.start.outputs.review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
+    permissions: &claude_permissions
       contents: read
       # Prepare reads the PR's description and inline comments. The verdict
       # job posts the review's comments, so no reviewer holds a write token.
       pull-requests: read
+    env:
+      REVIEW_MODEL: claude-sonnet-5-5
     outputs:
       reviewer: Claude
       # The verdict job names it in the footer of each inline comment.
-      model: claude-sonnet-5-5
+      model: ${{ env.REVIEW_MODEL }}
       candidates: ${{ steps.prepare.outputs.candidates }}
-    steps:
+    steps: &claude_steps
       # A required secret that is unset fails the run before start, which
       # leaves the head with no verdict that an approval or override could
       # clear. Failing here leaves the verdict to the other reviewers, or makes
@@ -204,6 +207,18 @@ jobs:
         with:
           step: prepare
           focus: ${{ inputs.focus }}
+      # The two jobs read the PR discussion independently. Digests let a
+      # comparison exclude pairs whose inputs changed between checkouts.
+      - name: Record review input digests
+        if: vars.AI_REVIEW_COMPARE_OPUS == 'true'
+        continue-on-error: true
+        working-directory: ${{ steps.prepare.outputs.inputs }}
+        env:
+          DIGESTS: ${{ runner.temp }}/ai-review-${{ github.job }}.inputs.sha256
+        run: |
+          hashes=$(sha256sum -- pr.diff commits.txt description.md comments.jsonl review-comments.jsonl \
+            previous-verdict.md reviewers.jsonl instructions.txt)
+          printf '%s\n' "$hashes" > "$DIGESTS"
       - id: claude
         # A job timeout reports `cancelled` and would leave the head pending,
         # where no override applies; a step timeout fails the job instead.
@@ -246,7 +261,7 @@ jobs:
             none, and decide human_review for the change at this head.
           # The schema rides in single quotes; the action's tests keep quotes out of it.
           claude_args: |
-            --model claude-sonnet-5-5
+            --model ${{ env.REVIEW_MODEL }}
             --effort xhigh
             --json-schema '${{ steps.prepare.outputs.schema }}'
             --add-dir ${{ steps.prepare.outputs.inputs }}
@@ -258,14 +273,16 @@ jobs:
       - name: Save the review
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-          REVIEW: ${{ runner.temp }}/ai-review-claude.json
+          REVIEW: ${{ runner.temp }}/ai-review-${{ github.job }}.json
         run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output' "$EXECUTION_FILE" > "$REVIEW"
       # A step timeout fails the job rather than cancelling it.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         timeout-minutes: 2
         with:
-          name: ai-review-claude
-          path: ${{ runner.temp }}/ai-review-claude.json
+          name: ai-review-${{ github.job }}
+          path: |
+            ${{ runner.temp }}/ai-review-${{ github.job }}.json
+            ${{ runner.temp }}/ai-review-${{ github.job }}.inputs.sha256
           if-no-files-found: error
       # Runs however the review ended, so a cancelled or failed review still
       # reports what it spent. A public repository records usage only for a
@@ -276,21 +293,37 @@ jobs:
         with:
           step: usage
           provider: claude
-          model: claude-sonnet-5-5
-          usage-file: ${{ runner.temp }}/ai-review-usage-claude.json
+          model: ${{ env.REVIEW_MODEL }}
+          usage-file: ${{ runner.temp }}/ai-review-usage-${{ github.job }}.json
       - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         timeout-minutes: 2
         continue-on-error: true
         with:
-          name: ai-review-usage-claude
-          path: ${{ runner.temp }}/ai-review-usage-claude.json
+          name: ai-review-usage-${{ github.job }}
+          path: ${{ runner.temp }}/ai-review-usage-${{ github.job }}.json
           if-no-files-found: warn
           retention-days: 1
 
+  # Reuses the same policy, setup and effort with a different model. Its
+  # result is available for comparison and cost, outside the merge gates.
+  opus:
+    needs: start
+    if: needs.start.outputs.review == 'true' && vars.AI_REVIEW_COMPARE_OPUS == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    permissions: *claude_permissions
+    env:
+      REVIEW_MODEL: claude-opus-5-5
+    outputs:
+      reviewer: Claude Opus
+      model: ${{ env.REVIEW_MODEL }}
+    steps: *claude_steps
+
   verdict:
     needs: [claude]
-    # Runs once every reviewer job ends. A job-level `if` also sees start's
+    # Runs once the required reviewer ends. A job-level `if` also sees start's
     # result in `needs`, so this passes whenever start succeeded or failed.
     # publish sets nothing when every reviewer was skipped or cancelled: a
     # draft gets no verdict, and a cancelled run, or a start that failed after
@@ -311,10 +344,7 @@ jobs:
         timeout-minutes: 2
         continue-on-error: true
         with:
-          # Also matches the usage artifacts, whose files publish ignores.
-          pattern: ai-review-*
-          # One directory, whether one artifact matches or several.
-          merge-multiple: true
+          name: ai-review-claude
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
       - id: publish
@@ -327,10 +357,9 @@ jobs:
           hand-off: ${{ inputs.hand_off && 'job' || '' }}
 
   cost:
-    needs: [claude, verdict]
-    # Runs once the verdict is out, including when a newer push cancelled the
-    # run, so cancelled rounds are counted too. A public repository runs it
-    # only for a collector.
+    needs: [claude, opus, verdict]
+    # Runs after the verdict and the comparison, including when a newer push
+    # cancelled the run. A public repository runs it only for a collector.
     if: >-
       always() &&
       (github.event.repository.private || inputs.otlp_endpoint != '') &&

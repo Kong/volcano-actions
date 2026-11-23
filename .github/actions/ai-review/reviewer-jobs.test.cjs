@@ -2,143 +2,119 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
+const {
+  reviewWorkflow,
+  action,
+  jobsOf,
+  stepsOf,
+  stepText,
+  outputsOf,
+  reviewerJobs,
+  modelOf,
+} = require('./test-workflow.cjs');
 
-// Each reviewer job's provider step, the credential secret it calls with, how
-// that step names its model, and how the job refuses bots outside allowed_bots.
-const providers = {
-  claude: {
-    step: '- id: claude',
-    secret: 'anthropic_api_key',
-    model: /\n {12}--model (\S+)\n/u,
-    bots: /\n {10}allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/u,
-  },
-};
+const claudeStep = '- id: claude';
 const prepare = `- id: prepare\n        uses: ${action}\n        with:\n          step: prepare\n          focus: \${{ inputs.focus }}\n`;
 
-test('every job with a reviewer output is in verdict.needs, and every job it needs is a reviewer', () => {
+test('Sonnet decides the verdict and the opt-in Opus job shares its read-only review steps', () => {
   const jobs = jobsOf(reviewWorkflow());
-  const needs = jobs.verdict.match(/\n {4}needs: \[(.*)\]\n/u)[1].split(', ');
-  assert.deepEqual(reviewerJobs(jobs), needs);
-  assert.deepEqual(Object.keys(providers), needs);
+  const { claude, opus, verdict } = jobs;
+  assert.deepEqual(reviewerJobs(jobs), ['claude', 'opus']);
+  assert.match(verdict, /\n {4}needs: \[claude\]\n/u);
+  assert.match(claude, /\n {4}if: needs\.start\.outputs\.review == 'true'\n/u);
+  assert.match(opus, /\n {4}if: needs\.start\.outputs\.review == 'true' && vars\.AI_REVIEW_COMPARE_OPUS == 'true'\n/u);
+  assert.match(opus, /\n {4}continue-on-error: true\n/u);
+  assert.match(claude, /\n {4}steps: &claude_steps\n/u);
+  assert.match(opus, /\n {4}steps: \*claude_steps\n/u);
+  assert.match(
+    claude,
+    /\n {4}permissions: &claude_permissions\n {6}contents: read\n(?: {6}#.*\n)* {6}pull-requests: read\n/u,
+  );
+  assert.match(opus, /\n {4}permissions: \*claude_permissions\n/u);
+  for (const name of reviewerJobs(jobs)) assert.doesNotMatch(jobs[name], /: write|mcp__/u, name);
 });
 
-test('every reviewer job names itself and its model, and reports its candidates', () => {
-  const jobs = jobsOf(reviewWorkflow());
-  for (const name of reviewerJobs(jobs)) {
-    const outputs = outputsOf(jobs[name]);
-    // The review itself is an artifact, which no environment variable carries.
-    assert.deepEqual(Object.keys(outputs), ['reviewer', 'model', 'candidates'], name);
-    // A static name, which only the run log shows.
-    assert.match(outputs.reviewer, /^[A-Z][\w ]*$/u, name);
-    // The model the provider step runs, which each inline comment's footer names.
-    assert.equal(outputs.model, stepText(jobs[name], providers[name].step).match(providers[name].model)?.[1], name);
-    assert.equal(outputs.candidates, '${{ steps.prepare.outputs.candidates }}', name);
-  }
+test('each reviewer runs and reports its configured model', () => {
+  const { claude, opus } = jobsOf(reviewWorkflow());
+  assert.equal(modelOf(claude), 'claude-sonnet-5-5');
+  assert.equal(modelOf(opus), 'claude-opus-5-5');
+  assert.deepEqual(outputsOf(claude), {
+    reviewer: 'Claude',
+    model: '${{ env.REVIEW_MODEL }}',
+    candidates: '${{ steps.prepare.outputs.candidates }}',
+  });
+  assert.deepEqual(outputsOf(opus), { reviewer: 'Claude Opus', model: '${{ env.REVIEW_MODEL }}' });
+  assert.match(stepText(claude, claudeStep), /\n {12}--model \$\{\{ env\.REVIEW_MODEL \}\}\n/u);
 });
 
-test('every reviewer job uploads only its structured output, as the artifact named for the job', () => {
-  const jobs = jobsOf(reviewWorkflow());
-  for (const name of reviewerJobs(jobs)) {
-    const steps = stepsOf(jobs[name]);
-    const file = `\${{ runner.temp }}/ai-review-${name}.json`;
-    const upload = stepText(jobs[name], 'actions/upload-artifact@');
-    assert.match(upload, /^actions\/upload-artifact@[a-f0-9]{40} # v[\d.]+\n/u, name);
-    assert.ok(upload.includes(`\n          name: ai-review-${name}\n          path: ${file}\n`), name);
-    // A missing output or a failed upload fails the job, so the review is incomplete.
-    assert.match(upload, /\n {10}if-no-files-found: error(?:\n|$)/u, name);
-    assert.match(upload, /\n {8}timeout-minutes: \d+\n/u, name);
-    // The usage step and its upload end the job and are the only steps that
-    // may fail quietly, since they never decide the review.
-    assert.equal(jobs[name].match(/actions\/upload-artifact@/gu).length, 2, name);
-    assert.equal(jobs[name].match(/continue-on-error/gu).length, 2, name);
-    const usage = jobs[name].lastIndexOf('\n      - ', jobs[name].indexOf('step: usage'));
-    assert.ok(jobs[name].indexOf('continue-on-error') > usage, name);
-    // The provider step, or one after it, writes the file the upload reads.
-    const from = steps.indexOf(providers[name].step);
-    const to = steps.indexOf('actions/upload-artifact@');
-    assert.ok(from !== -1 && from < to, name);
-    assert.ok(steps.slice(from, to).includes(file), name);
-  }
-  // Claude's execution file holds everything it read; only the output leaves.
-  const save = stepText(jobs.claude, '- name: Save the review');
+test('the shared steps upload separate structured reviews and fingerprint the prepared inputs during a bake', () => {
+  const { claude } = jobsOf(reviewWorkflow());
+  const upload = stepText(claude, 'actions/upload-artifact@');
+  assert.match(upload, /^actions\/upload-artifact@[a-f0-9]{40} # v[\d.]+\n/u);
+  assert.match(upload, /\n {10}name: ai-review-\$\{\{ github\.job \}\}\n/u);
+  const output = '${{ runner.temp }}/ai-review-${{ github.job }}';
+  assert.ok(upload.includes(`\n          path: |\n            ${output}.json\n            ${output}.inputs.sha256\n`));
+  assert.match(upload, /\n {10}if-no-files-found: error(?:\n|$)/u);
+  assert.match(upload, /\n {8}timeout-minutes: \d+\n/u);
+  const steps = stepsOf(claude);
+  const digest = stepText(claude, '- name: Record review input digests');
+  assert.match(digest, /\n {8}if: vars\.AI_REVIEW_COMPARE_OPUS == 'true'\n {8}continue-on-error: true\n/u);
+  assert.match(digest, /\n {8}working-directory: \$\{\{ steps\.prepare\.outputs\.inputs \}\}\n/u);
+  assert.ok(digest.includes(`\n          DIGESTS: ${output}.inputs.sha256\n`));
+  assert.match(digest, /sha256sum -- pr\.diff commits\.txt description\.md comments\.jsonl review-comments\.jsonl/u);
+  assert.match(digest, /previous-verdict\.md reviewers\.jsonl instructions\.txt/u);
+  assert.ok(steps.indexOf('- id: prepare') < steps.indexOf(digest));
+  assert.ok(steps.indexOf(digest) < steps.indexOf(claudeStep));
+  const save = stepText(claude, '- name: Save the review');
   assert.match(save, /\n {10}EXECUTION_FILE: \$\{\{ steps\.claude\.outputs\.execution_file \}\}\n/u);
+  assert.ok(save.includes(`\n          REVIEW: ${output}.json\n`));
   assert.match(save, /\n {8}run: jq -ce '.*\| \.structured_output' "\$EXECUTION_FILE" > "\$REVIEW"$/u);
+  assert.ok(steps.indexOf(save) < steps.indexOf('actions/upload-artifact@'));
 });
 
-test('no reviewer job holds a write token; the verdict job posts the comments', () => {
-  const jobs = jobsOf(reviewWorkflow());
-  for (const name of reviewerJobs(jobs)) {
-    assert.match(
-      jobs[name],
-      /\n {4}permissions:\n {6}contents: read\n(?: {6}#.*\n)* {6}pull-requests: read\n {4}outputs:/u,
-      name,
-    );
-    assert.doesNotMatch(jobs[name], /: write|mcp__/u, name);
-  }
+test('the shared steps require the credential and prepare the checked-out base before reviewing', () => {
+  const { claude } = jobsOf(reviewWorkflow());
+  const steps = stepsOf(claude);
+  const guard = stepText(claude, '- name: Require the credential');
+  assert.equal(steps.match(/^ {6}- (.*)$/mu)[1], 'name: Require the credential');
+  assert.match(guard, /\n {10}KEY_SET: \$\{\{ secrets\.anthropic_api_key != '' \}\}\n/u);
+  assert.match(guard, /exit 1\n/u);
+  assert.deepEqual(claude.match(/ ref: .*/gu), [' ref: ${{ github.event.pull_request.base.sha }}']);
+  assert.equal(steps.match(/actions\/checkout@/gu).length, 1);
+  assert.ok(steps.includes(prepare));
+  const order = ['- name: Require the credential', 'actions/checkout@', '- id: prepare', claudeStep].map((marker) =>
+    steps.indexOf(marker),
+  );
+  assert.deepEqual(
+    [...order].sort((a, b) => a - b),
+    order,
+  );
+  assert.ok(!order.includes(-1));
+  assert.match(stepText(claude, claudeStep), /anthropic_api_key: \$\{\{ secrets\.anthropic_api_key \}\}\n/u);
 });
 
-test('every reviewer job requires its credential, then prepares the base checkout with the action', () => {
-  const jobs = jobsOf(reviewWorkflow());
-  for (const name of reviewerJobs(jobs)) {
-    const { step, secret } = providers[name];
-    const steps = stepsOf(jobs[name]);
-    // A missing credential fails the job, so the other reviewers' verdict stands.
-    const guard = stepText(jobs[name], '- name: Require the credential');
-    assert.equal(steps.match(/^ {6}- (.*)$/mu)[1], 'name: Require the credential', name);
-    assert.match(guard, new RegExp(`\\n {10}KEY_SET: \\$\\{\\{ secrets\\.${secret} != '' \\}\\}\\n`, 'u'), name);
-    assert.match(guard, /exit 1\n/u, name);
-    // The base sits at the workspace root; prepare puts the head beside it as data.
-    assert.deepEqual(jobs[name].match(/ ref: .*/gu), [' ref: ${{ github.event.pull_request.base.sha }}'], name);
-    assert.equal(jobs[name].match(/actions\/checkout@/gu).length, 1, name);
-    assert.ok(steps.includes(prepare), name);
-    const order = ['- name: Require the credential', 'actions/checkout@', '- id: prepare', step].map((m) =>
-      steps.indexOf(m),
-    );
-    assert.deepEqual(
-      [...order].sort((a, b) => a - b),
-      order,
-      name,
-    );
-    assert.ok(!order.includes(-1), name);
-    assert.match(stepText(jobs[name], step), new RegExp(`: \\$\\{\\{ secrets\\.${secret} \\}\\}\\n`, 'u'), name);
-  }
+test('both models get the shared policy and schema and observe the existing bot policy', () => {
+  const { claude } = jobsOf(reviewWorkflow());
+  const run = stepText(claude, claudeStep);
+  assert.match(run, /\n {10}prompt: \|\n {12}\$\{\{ steps\.prepare\.outputs\.policy \}\}\n\n/u);
+  assert.doesNotMatch(run, /- p0: |Separately from findings|reviewers\.jsonl lists|\$\{\{ inputs\.focus \}\}/u);
+  assert.match(run, /\n {12}--json-schema '\$\{\{ steps\.prepare\.outputs\.schema \}\}'\n/u);
+  assert.match(run, /\n {12}--add-dir \$\{\{ steps\.prepare\.outputs\.inputs \}\}\n/u);
+  assert.match(run, /\n {12}Post no comments; the workflow publishes your structured output\.\n/u);
+  assert.match(run, /\n {10}allowed_bots: \$\{\{ inputs\.allowed_bots \}\}\n/u);
 });
 
-test('every reviewer gets the shared policy first and a schema from prepare', () => {
+test('a hung review step fails before its job times out', () => {
   const jobs = jobsOf(reviewWorkflow());
-  for (const name of reviewerJobs(jobs)) {
-    const run = stepText(jobs[name], providers[name].step);
-    assert.match(run, /\n {10}(?:prompt|PROMPT): \|\n {12}\$\{\{ steps\.prepare\.outputs\.policy \}\}\n\n/u, name);
-    assert.match(run, /\$\{\{ steps\.prepare\.outputs\.schema(?:-without-max-length)? \}\}/u, name);
-    // The policy is the one place a review's rules live.
-    assert.doesNotMatch(run, /- p0: |Separately from findings|reviewers\.jsonl lists|\$\{\{ inputs\.focus \}\}/u, name);
-  }
-  const claude = stepText(jobs.claude, providers.claude.step);
-  // The schema rides in single quotes in claude_args; prepare's has none.
-  assert.match(claude, /\n {12}--json-schema '\$\{\{ steps\.prepare\.outputs\.schema \}\}'\n/u);
-  assert.match(claude, /\n {12}--add-dir \$\{\{ steps\.prepare\.outputs\.inputs \}\}\n/u);
-  // The verdict job posts every reviewer's inline comments.
-  assert.match(claude, /\n {12}Post no comments; the workflow publishes your structured output\.\n/u);
-});
-
-test('a hung reviewer fails its job instead of leaving the head pending', () => {
-  const jobs = jobsOf(reviewWorkflow());
+  const run = stepText(jobs.claude, claudeStep);
+  const step = Number(run.match(/\n {8}timeout-minutes: (\d+)\n/u)[1]);
   for (const name of reviewerJobs(jobs)) {
     const job = Number(jobs[name].match(/\n {4}timeout-minutes: (\d+)\n/u)[1]);
-    const run = stepText(jobs[name], providers[name].step);
-    const step = Number(run.match(/\n {8}timeout-minutes: (\d+)\n/u)[1]);
     assert.ok(step < job, `${name}: step ${step} must time out before job ${job}`);
   }
 });
 
-test('every reviewer job refuses bots outside allowed_bots', () => {
-  const jobs = jobsOf(reviewWorkflow());
-  // start() leaves bots to the reviewers, so a job without this would review any bot.
-  for (const name of reviewerJobs(jobs)) assert.match(jobs[name], providers[name].bots, name);
-});
-
-test('one verdict job publishes every reviewer once any of them finishes', () => {
+test('the verdict downloads the required review after Sonnet finishes', () => {
   const job = jobsOf(reviewWorkflow()).verdict;
   assert.match(
     job,
@@ -147,15 +123,14 @@ test('one verdict job publishes every reviewer once any of them finishes', () =>
   const steps = stepsOf(job);
   assert.equal(steps.match(/\n {6}- /gu).length, 2);
   assert.ok(steps.indexOf('actions/download-artifact@') < steps.indexOf(`- id: publish\n        uses: ${action}\n`));
-  // Every reviewer's artifact, into one directory, and never a reason to skip publish.
+  // An unavailable required artifact still needs a published verdict.
   const download = stepText(job, 'actions/download-artifact@');
   assert.match(download, /^actions\/download-artifact@[a-f0-9]{40} # v[\d.]+\n/u);
   const outputs = '${{ runner.temp }}/ai-review-outputs';
   for (const line of [
     'timeout-minutes: 2',
     'continue-on-error: true',
-    '  pattern: ai-review-*',
-    '  merge-multiple: true',
+    '  name: ai-review-claude',
     `  path: ${outputs}`,
   ]) {
     assert.ok(download.includes(`\n        ${line}\n`) || download.endsWith(`\n        ${line}`), line);

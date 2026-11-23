@@ -15,7 +15,7 @@ const jobsOf = (workflow) =>
       .split(/\n(?= {2}[a-z-]+:\n)/u)
       .map((job) => [job.match(/^ {2}([a-z-]+):/u)[1], job]),
   );
-const stepsOf = (job) => job.split('\n    steps:\n')[1];
+const stepsOf = (job) => job.match(/\n {4}steps:(?: &[\w-]+)?\n([\s\S]*)/u)?.[1];
 // The text of a step from its first line to the next step or comment above one.
 const stepText = (job, marker) => {
   const body = stepsOf(job);
@@ -29,7 +29,9 @@ const outputsOf = (job) => {
   const block = job.match(/\n {4}outputs:\n((?: {6}.*\n)+)/u)?.[1] ?? '';
   return Object.fromEntries([...block.matchAll(/^ {6}([a-z-]+): (.*)$/gmu)].map(([, name, value]) => [name, value]));
 };
-// The jobs the verdict combines: those with a reviewer output.
+// Every job that may report review cost, including comparison reviewers.
 const reviewerJobs = (jobs) => Object.keys(jobs).filter((name) => Object.hasOwn(outputsOf(jobs[name]), 'reviewer'));
 
-module.exports = { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs };
+const modelOf = (job) => job.match(/\n {6}REVIEW_MODEL: (\S+)\n/u)?.[1];
+
+module.exports = { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs, modelOf };
