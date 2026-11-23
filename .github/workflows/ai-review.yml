@@ -153,7 +153,7 @@ jobs:
     steps:
       # This job has a write token. Never check out the PR.
       - id: start
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: start
 
@@ -200,7 +200,7 @@ jobs:
       # history of the changed files, before Claude runs; the PR's own commits
       # can name any author.
       - id: prepare
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: prepare
           focus: ${{ inputs.focus }}
@@ -271,7 +271,7 @@ jobs:
       # reports what it spent. A public repository records usage only for a
       # collector, since its artifacts are public.
       - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         continue-on-error: true
         with:
           step: usage
@@ -318,7 +318,7 @@ jobs:
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
       - id: publish
-        uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+        uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: publish
           reviews: ${{ toJSON(needs) }}
@@ -351,7 +351,7 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/ai-review-usage
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+      - uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: cost
           reviews: ${{ toJSON(needs) }}
@@ -372,6 +372,6 @@ jobs:
       statuses: write
     steps:
       # This job has a write token. Never check out the PR.
-      - uses: Kong/volcano-actions/.github/actions/ai-review@d831793b175eadf5949ebd710bf5a3a93e26c343
+      - uses: Kong/volcano-actions/.github/actions/ai-review@5d147443f51b7796515d068fa353fdaa71e4bb18
         with:
           step: override
