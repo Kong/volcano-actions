@@ -4,34 +4,28 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { reviewWorkflow, action, jobsOf, stepsOf, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
+const { reviewWorkflow, action, jobsOf, stepsOf, reviewerJobs, modelOf } = require('./test-workflow.cjs');
 const { tempDir } = require('./test-git.cjs');
 
 // A public repository's artifacts are public, so usage is recorded there only
 // for a collector.
 const recorded = "always() && (github.event.repository.private || inputs.otlp_endpoint != '')";
 
-test('every reviewer job records its usage however it ended, without failing the review, as the artifact named for the job', () => {
-  const jobs = jobsOf(reviewWorkflow());
-  for (const name of reviewerJobs(jobs)) {
-    const steps = stepsOf(jobs[name]);
-    const file = `\${{ runner.temp }}/ai-review-usage-${name}.json`;
-    const usage = steps.slice(steps.indexOf('step: usage') - 200);
-    assert.ok(
-      steps.includes(
-        `- if: ${recorded}\n        uses: ${action}\n        continue-on-error: true\n        with:\n          step: usage\n          provider: ${name}\n`,
-      ),
-      name,
-    );
-    assert.ok(usage.includes(`\n          usage-file: ${file}\n`), name);
-    // The model the job runs, which prices a session log that names none.
-    assert.ok(usage.includes(`\n          model: ${outputsOf(jobs[name]).model}\n`), name);
-    const upload = steps.slice(steps.lastIndexOf('actions/upload-artifact@'));
-    assert.ok(steps.lastIndexOf(`- if: ${recorded}\n        uses: actions/upload-artifact@`) !== -1, name);
-    assert.ok(upload.includes(`\n          name: ai-review-usage-${name}\n          path: ${file}\n`), name);
-    // Kept only until the cost job has read it.
-    assert.match(upload, /\n {10}retention-days: 1\n/u, name);
-  }
+test('the shared steps record usage by job and model without failing the review', () => {
+  const steps = stepsOf(jobsOf(reviewWorkflow()).claude);
+  const usage = steps.slice(steps.indexOf('step: usage') - 200);
+  const file = '${{ runner.temp }}/ai-review-usage-${{ github.job }}.json';
+  assert.ok(
+    steps.includes(
+      `- if: ${recorded}\n        uses: ${action}\n        continue-on-error: true\n        with:\n          step: usage\n          provider: claude\n`,
+    ),
+  );
+  assert.ok(usage.includes(`\n          usage-file: ${file}\n`));
+  assert.ok(usage.includes('\n          model: ${{ env.REVIEW_MODEL }}\n'));
+  const upload = steps.slice(steps.lastIndexOf('actions/upload-artifact@'));
+  assert.ok(steps.lastIndexOf(`- if: ${recorded}\n        uses: actions/upload-artifact@`) !== -1);
+  assert.ok(upload.includes(`\n          name: ai-review-usage-\${{ github.job }}\n          path: ${file}\n`));
+  assert.match(upload, /\n {10}retention-days: 1\n/u);
 });
 
 test('the cost job runs after the verdict, even when the run was cancelled, and holds no more than it needs', () => {
@@ -67,9 +61,9 @@ test('the pinned action prices the usage file each reviewer job uploads', (t) =>
   const dir = tempDir(t, 'ai-review-usage-');
   const needs = { verdict: { result: 'success', outputs: {} } };
   for (const name of reviewerJobs(jobs)) {
-    const model = jobs[name].match(/\n {6}model: (\S+)\n/u)[1];
+    const model = modelOf(jobs[name]);
     const usage = {
-      provider: name,
+      provider: 'claude',
       attempt: 1,
       models: { [model]: { calls: 1, tokens: { input: 1000, output: 100 } } },
     };

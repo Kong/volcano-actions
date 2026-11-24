@@ -38,9 +38,9 @@ records the count.
 
 ### Reviewers
 
-The `claude` job in `ai-review.yml` runs Claude Sonnet 5.5. The review policy
-and output schema ship with the action as `.github/actions/ai-review/policy.md`
-and `schema.json`.
+In `ai-review.yml`, the `claude` and `opus` jobs run Claude Sonnet 5.5 and
+Claude Opus 5.5. The review policy and output schema ship with the action as
+`.github/actions/ai-review/policy.md` and `schema.json`.
 
 - The action's `prepare` step builds the inputs in a checkout of the base
   branch: the diff, commit messages, and description; the comments the
@@ -54,32 +54,26 @@ and `schema.json`.
   its verdict, and its own hardening. Claude reads the checkouts with no shell.
   No reviewer job holds a write token. The verdict job posts the comments.
 
-One verdict combines every reviewer, and the summary comment reads as a
-single review that names no reviewer or provider, however many ran:
+The verdict and its summary combine the reviews that completed. Either
+reviewer can ask for human review. The summary comment names no model.
 
-- A P0-P2 finding from any reviewer fails it, unless it is a P2 the author
-  deferred (see below). Any reviewer can ask for a person.
-- The comment lists and counts each problem once, by title. Findings from
-  different reviewers with nearly the same title, or else within 20 lines of
-  each other in one file, are one problem, shown at the most severe level any
-  reviewer gave it, with every location and the other reviewers' titles. One
-  reviewer's findings stay as it wrote them. Each finding on a line, except a
-  deferred P2, also gets an inline comment that explains why it matters, with
-  a footer naming the model that found it, so two models reporting the same
-  problem leave two comments.
+- A P0-P2 finding fails the verdict, unless it is a P2 the author deferred
+  (see below).
+- The comment groups findings with similar titles or nearby lines in the
+  same file into one problem at the highest severity reported. Each finding
+  on a line, except a deferred P2, gets an inline comment naming its model.
 - Each round sees how people answered the last one. A P2 finding the PR
   author defers to named follow-up work, or declines with a concrete reason,
   in the description or a comment, is listed for a person to decide instead
   of failing the verdict again, unless the code has since made it worse. P0
   and P1 findings still fail. Such a verdict passes only once the summary
   comment records the deferral, which the human review reads back.
-- When a provider has an outage or its review otherwise does not complete, the
-  other reviewers' verdict stands, and the run log warns which one is missing.
-  When none completes, the verdict is an error and the head waits for a
-  person, as described below.
+- When one review fails or its output is unreadable, the verdict uses the
+  completed review and reports the missing coverage. When neither completes,
+  the verdict is an error and the head waits for a person.
 
-To add a provider, change the workflow and the cost tables; the verdict reads
-any number of reviewers:
+To add a reviewer whose findings should affect the verdict, change the
+workflow and the cost tables:
 
 1. Add a job to `ai-review.yml` like `claude`. It requires its credential,
    refuses bots outside `allowed_bots` (start leaves bots to the reviewers),
@@ -88,21 +82,44 @@ any number of reviewers:
    `schema-without-max-length`) and its own prompt lines. Its outputs are
    `reviewer`, the name the run log uses; `model`, the model its inline
    comments name; and `candidates`, from prepare. It writes its structured
-   output to `ai-review-<job ID>.json` and uploads that file alone as the
-   artifact `ai-review-<job ID>`, which the verdict job downloads. A job
-   output would reach publish through an environment variable, which holds at
+   output to `ai-review-<job ID>.json` in an artifact named
+   `ai-review-<job ID>`. Download each required review's artifact into the
+   verdict job's output directory.
+   A job output would reach publish through an environment variable, which holds at
    most 128 KiB. It ends, like them, with the action's `step: usage` and the
    upload of `ai-review-usage-<job ID>`, which the cost job downloads.
 2. List the job in the `needs` of the `verdict` and `cost` jobs; the cost job
    prices only the reviewers it needs.
 3. Add its credential to the workflow's secrets, with `required: false`, and
    to the caller stubs below.
-4. Add the job to the provider list in
-   `.github/actions/ai-review/reviewer-jobs.test.cjs`, whose tests hold every
-   reviewer job to these rules.
+4. Extend `.github/actions/ai-review/reviewer-jobs.test.cjs` to cover the
+   new job's credential check, permissions, bot allowlist, and unique artifacts.
 5. Add its `model` to `.github/actions/ai-review/prices.cjs`; a test fails
    while any reviewer's model has no price. If its CLI writes a session log
    unlike Claude Code's, add a reader for it to `usage.cjs`.
+
+### Compare Sonnet and Opus
+
+Claude Opus 5.5 runs beside Claude Sonnet 5.5 on every eligible head.
+Callers using `@main` receive the comparison when this workflow lands on
+`main`. Callers using a workflow commit pick it up when they update their pin.
+
+Both jobs use the same policy, schema, and reasoning effort. Both feed the
+verdict and human review status. The caller's automatic move-to-draft step
+waits for the whole workflow.
+
+Open **Run log** from the PR's review summary and look for **Opus-only
+findings** on the workflow run summary. It flags problems the grouping rules
+associate only with Opus, shows which block the verdict, and shows whether
+Sonnet alone would have passed the findings gate. The comparison needs both
+completed reviews and matching input digests, since intervening edits or
+comments can change what each model sees.
+
+After at least a week, use the latest matched run for each PR and check the
+flagged findings against its diff. Download the full reviews for a comparison
+of rationale, severity, and human review requests with
+`gh run download RUN_ID --name ai-review-claude --name ai-review-opus`.
+Compare the model costs separately when recorded.
 
 ### Human review
 

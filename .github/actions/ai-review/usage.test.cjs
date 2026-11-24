@@ -7,7 +7,7 @@ const test = require('node:test');
 const { usage, claudeUsage, codexUsage } = require('./usage.cjs');
 const { tempDir } = require('./test-git.cjs');
 const { prices } = require('./prices.cjs');
-const { reviewWorkflow, jobsOf, outputsOf, reviewerJobs } = require('./test-workflow.cjs');
+const { reviewWorkflow, jobsOf, modelOf, reviewerJobs } = require('./test-workflow.cjs');
 const { clearAfter, core } = require('./test-helpers.cjs');
 
 const jsonl = (...records) => `${records.map((r) => JSON.stringify(r)).join('\n')}\n`;
@@ -142,7 +142,7 @@ test('the usage step records no models, with a warning, when the session log is 
 
 test('every reviewer job names a model the price table lists', () => {
   const jobs = jobsOf(reviewWorkflow());
-  const models = reviewerJobs(jobs).map((name) => outputsOf(jobs[name]).model);
+  const models = reviewerJobs(jobs).map((name) => modelOf(jobs[name]));
   assert.ok(models.length > 0);
   for (const model of models) assert.ok(Object.hasOwn(prices, model), `${model} has no price in prices.cjs`);
 });

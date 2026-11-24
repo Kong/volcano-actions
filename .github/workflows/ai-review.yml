@@ -1,7 +1,7 @@
 # Reusable AI review for Volcano repositories. Each repository calls it from a
-# pull_request_target workflow (see README.md). Each reviewer job below reviews
-# every push to a same-repository PR, and one verdict combines them as the
-# `ai-review/verdict` commit status on the reviewed head. Findings are ranked
+# pull_request_target workflow (see README.md). Sonnet and Opus review each
+# eligible head of a same-repository PR. One `ai-review/verdict` commit status
+# combines the reviews that complete. Findings are ranked
 # P0-P3. A P0-P2 finding fails the verdict unless it is a P2 the author
 # deferred. The workflow also reports `ai-review/human`,
 # which waits for a person's approval when a reviewer, a deferral, a reserved
@@ -10,10 +10,9 @@
 # can drop its required approvals. When it waits, the review asks one
 # collaborator by name: the first reviewer's pick among those with recent
 # history in the changed files. ai-review-human.yml re-sets it when reviews or
-# that label change. Reviewers that do not complete leave the verdict to those
-# that did; when none does, the verdict is an error and the head waits for a
-# person. A run that reviews nothing, because start skipped the head or
-# failed, publishes no verdict.
+# that label change. When neither review completes, the verdict is an error
+# and the head waits for a person. When start skips the head or fails,
+# the run publishes no verdict.
 #
 # After three failing rounds in a row since the PR was last marked ready for
 # review, the review hands the PR back: it moves the PR to draft, which start
@@ -25,16 +24,15 @@
 # the verdict job hands off with its own token, which GitHub refuses, so its
 # comment says the review goes on.
 #
-# To add a provider, add a job like `claude` that ends with the usage step and
-# its upload, list it in `verdict.needs` and `cost.needs`, and add its
-# credential secret to workflow_call.
+# To add a required reviewer, add its job and credential. List the job in
+# `verdict.needs` and `cost.needs`, and download its output in the verdict job.
 #
 # - The policy (.github/actions/ai-review/policy.md) defines each level by
 #   what happens if it is not fixed and never says which levels fail, so a
 #   reviewer ranks the problem rather than the gate. Likewise it defines when a
 #   person is needed by the change, never by what that decision lets the PR
 #   skip. Each reviewer job adds only how its provider reads and returns its
-#   verdict; the verdict job posts every reviewer's comments.
+#   verdict. The verdict job posts both reviewers' comments.
 # - pull_request_target runs as the caller's base branch, which supplies the
 #   stub and the credential secrets it passes. Every job skips on any other
 #   trigger.
@@ -54,10 +52,11 @@
 #   Its instructions and hooks come from the base and its MCP servers only from
 #   the action, so the PR cannot instruct its reviewer or run code on this
 #   runner.
-# - Each reviewer job uploads only its structured output, as the artifact
-#   `ai-review-<job ID>`, and the verdict job downloads them all. A job output
-#   would reach publish through an environment variable, which holds at most
-#   128 KiB. A missing or unreadable output leaves that review incomplete.
+# - Each reviewer job uploads its structured output as the artifact
+#   `ai-review-<job ID>` and includes hashes of its prepared inputs. The
+#   comparison job uses the hashes to identify matched pairs.
+#   A job output would reach publish through an environment variable, which
+#   holds at most 128 KiB. Missing output leaves the review incomplete.
 # - Statuses are per-SHA, so skipped runs never overwrite a verdict, a failed
 #   review is `error`, and a cancelled one stays `pending`.
 # - Each reviewer job also records what it spent, however it ended, as token
@@ -106,7 +105,7 @@ on:
         value: ${{ jobs.verdict.outputs.hand-off }}
     secrets:
       anthropic_api_key:
-        description: The Anthropic API key the claude job calls Claude with. Every caller passes it; the claude job fails without it.
+        description: The Anthropic API key both reviewer jobs use. Every caller passes it, and both jobs fail without it.
         required: false
       codex_access_token:
         description: Deprecated compatibility input for older caller workflows.
@@ -162,21 +161,23 @@ jobs:
     if: needs.start.outputs.review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
+    permissions: &claude_permissions
       contents: read
       # Prepare reads the PR's description and inline comments. The verdict
       # job posts the review's comments, so no reviewer holds a write token.
       pull-requests: read
+    env:
+      REVIEW_MODEL: claude-sonnet-5-5
     outputs:
-      reviewer: Claude
+      reviewer: Claude Sonnet
       # The verdict job names it in the footer of each inline comment.
-      model: claude-sonnet-5-5
+      model: ${{ env.REVIEW_MODEL }}
       candidates: ${{ steps.prepare.outputs.candidates }}
-    steps:
+    steps: &claude_steps
       # A required secret that is unset fails the run before start, which
       # leaves the head with no verdict that an approval or override could
-      # clear. Failing here leaves the verdict to the other reviewers, or makes
-      # it an error when none completes.
+      # clear. A missing credential fails at this step so the verdict can
+      # publish an error if neither review completes.
       - name: Require the credential
         env:
           KEY_SET: ${{ secrets.anthropic_api_key != '' }}
@@ -204,6 +205,17 @@ jobs:
         with:
           step: prepare
           focus: ${{ inputs.focus }}
+      # The two jobs read the PR discussion independently. Digests let a
+      # comparison exclude pairs whose inputs changed between checkouts.
+      - name: Record review input digests
+        continue-on-error: true
+        working-directory: ${{ steps.prepare.outputs.inputs }}
+        env:
+          DIGESTS: ${{ runner.temp }}/ai-review-${{ github.job }}.inputs.sha256
+        run: |
+          hashes=$(sha256sum -- pr.diff commits.txt description.md comments.jsonl review-comments.jsonl \
+            previous-verdict.md reviewers.jsonl instructions.txt)
+          printf '%s\n' "$hashes" > "$DIGESTS"
       - id: claude
         # A job timeout reports `cancelled` and would leave the head pending,
         # where no override applies; a step timeout fails the job instead.
@@ -246,7 +258,7 @@ jobs:
             none, and decide human_review for the change at this head.
           # The schema rides in single quotes; the action's tests keep quotes out of it.
           claude_args: |
-            --model claude-sonnet-5-5
+            --model ${{ env.REVIEW_MODEL }}
             --effort xhigh
             --json-schema '${{ steps.prepare.outputs.schema }}'
             --add-dir ${{ steps.prepare.outputs.inputs }}
@@ -258,14 +270,16 @@ jobs:
       - name: Save the review
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-          REVIEW: ${{ runner.temp }}/ai-review-claude.json
+          REVIEW: ${{ runner.temp }}/ai-review-${{ github.job }}.json
         run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output' "$EXECUTION_FILE" > "$REVIEW"
       # A step timeout fails the job rather than cancelling it.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         timeout-minutes: 2
         with:
-          name: ai-review-claude
-          path: ${{ runner.temp }}/ai-review-claude.json
+          name: ai-review-${{ github.job }}
+          path: |
+            ${{ runner.temp }}/ai-review-${{ github.job }}.json
+            ${{ runner.temp }}/ai-review-${{ github.job }}.inputs.sha256
           if-no-files-found: error
       # Runs however the review ended, so a cancelled or failed review still
       # reports what it spent. A public repository records usage only for a
@@ -276,21 +290,36 @@ jobs:
         with:
           step: usage
           provider: claude
-          model: claude-sonnet-5-5
-          usage-file: ${{ runner.temp }}/ai-review-usage-claude.json
+          model: ${{ env.REVIEW_MODEL }}
+          usage-file: ${{ runner.temp }}/ai-review-usage-${{ github.job }}.json
       - if: always() && (github.event.repository.private || inputs.otlp_endpoint != '')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         timeout-minutes: 2
         continue-on-error: true
         with:
-          name: ai-review-usage-claude
-          path: ${{ runner.temp }}/ai-review-usage-claude.json
+          name: ai-review-usage-${{ github.job }}
+          path: ${{ runner.temp }}/ai-review-usage-${{ github.job }}.json
           if-no-files-found: warn
           retention-days: 1
 
+  # Reuses the same policy, setup and effort with a different model.
+  opus:
+    needs: start
+    if: needs.start.outputs.review == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions: *claude_permissions
+    env:
+      REVIEW_MODEL: claude-opus-5-5
+    outputs:
+      reviewer: Claude Opus
+      model: ${{ env.REVIEW_MODEL }}
+      candidates: ${{ steps.prepare.outputs.candidates }}
+    steps: *claude_steps
+
   verdict:
-    needs: [claude]
-    # Runs once every reviewer job ends. A job-level `if` also sees start's
+    needs: [claude, opus]
+    # Runs once both reviewers end. A job-level `if` also sees start's
     # result in `needs`, so this passes whenever start succeeded or failed.
     # publish sets nothing when every reviewer was skipped or cancelled: a
     # draft gets no verdict, and a cancelled run, or a start that failed after
@@ -311,9 +340,7 @@ jobs:
         timeout-minutes: 2
         continue-on-error: true
         with:
-          # Also matches the usage artifacts, whose files publish ignores.
-          pattern: ai-review-*
-          # One directory, whether one artifact matches or several.
+          pattern: ai-review-{claude,opus}
           merge-multiple: true
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
@@ -326,11 +353,104 @@ jobs:
           human-review-paths: ${{ inputs.human_review_paths }}
           hand-off: ${{ inputs.hand_off && 'job' || '' }}
 
+  compare:
+    needs: [claude, opus]
+    if: needs.claude.result == 'success' && needs.opus.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      # Use the same trusted grouping rules as the verdict. This is the
+      # action repository at the action pin, never the caller or the PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Kong/volcano-actions
+          ref: 5d147443f51b7796515d068fa353fdaa71e4bb18
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          pattern: ai-review-{claude,opus}
+          merge-multiple: true
+          path: ${{ runner.temp }}/ai-review-outputs
+      - name: Flag Opus-only findings
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          REVIEW_OUTPUTS: ${{ runner.temp }}/ai-review-outputs
+          REVIEWS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const library = path.join(process.env.GITHUB_WORKSPACE, '.github/actions/ai-review');
+            const { reviewersOf, parsed, completed, severityOf, cap } = require(path.join(library, 'reviews.cjs'));
+            const { problems } = require(path.join(library, 'problems.cjs'));
+            const { severities, failing } = require(path.join(library, 'constants.cjs'));
+            const dir = process.env.REVIEW_OUTPUTS;
+            const jobs = JSON.parse(process.env.REVIEWS);
+
+            function reviewOf(job) {
+              const { reviewers } = reviewersOf(JSON.stringify({ [job]: jobs[job] }), dir);
+              const [entry] = parsed(reviewers);
+              return entry && completed(entry.result, entry.review) ? entry.review : null;
+            }
+
+            function digest(job) {
+              const file = path.join(dir, `ai-review-${job}.inputs.sha256`);
+              return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+            }
+
+            const summary = core.summary.addHeading('Opus-only findings', 2);
+            const sonnet = reviewOf('claude');
+            const opus = reviewOf('opus');
+            const sonnetDigest = digest('claude');
+            if (!sonnet || !opus || !sonnetDigest || sonnetDigest !== digest('opus')) {
+              await summary.addRaw('Comparison unavailable. Both completed reviews must have matching input digests.').write();
+              return;
+            }
+
+            const shape = (review) => review.findings.map((f) => ({
+              title: cap(String(f.title), 200),
+              path: cap(String(f.path), 300),
+              line: f.line,
+              severity: severityOf(f),
+              deferred: f.deferred === true,
+            }));
+            const sonnetFindings = shape(sonnet);
+            const opusFindings = shape(opus);
+            const opusKeys = new Set(problems([opusFindings]).map((p) => p.key));
+            const sonnetProblems = problems([sonnetFindings]);
+            const sonnetKeys = new Set(sonnetProblems.map((p) => p.key));
+            const combined = problems([sonnetFindings, opusFindings]);
+            // Group keys join sorted singleton keys with ' | '. Exclude any
+            // ambiguous key because titles and file paths may contain ' | '.
+            const pairs = new Set([...opusKeys].flatMap((o) =>
+              [...sonnetKeys].map((s) => [o, s].sort().join(' | '))));
+            const opusOnly = combined.filter((p) => opusKeys.has(p.key) && !sonnetKeys.has(p.key) && !pairs.has(p.key));
+            const blocks = (p) => failing.has(p.severity) && !p.deferred;
+            const blocking = opusOnly.filter(blocks).length;
+            const sonnetOutcome = sonnetProblems.some(blocks) ? 'fail' : 'pass';
+            const combinedOutcome = combined.some(blocks) ? 'fail' : 'pass';
+            summary.addRaw(`Findings verdict: Sonnet alone **${sonnetOutcome}**, combined **${combinedOutcome}**.`, true);
+            summary.addRaw(`**Opus-only candidates:** ${opusOnly.length}. **Blocking:** ${blocking}.`, true);
+            summary.addRaw('Matches use the verdict’s title and location rules. Check the candidates against the diff when scoring the comparison.', true);
+            const safe = (text) => String(text).replace(/[\r\n]+/gu, ' ')
+              .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+            for (const p of opusOnly) {
+              const { path: file, lines } = p.at[0];
+              const location = lines.length > 0 ? `${file}:${lines.join(',')}` : file;
+              const level = p.deferred ? 'Deferred P2' : severities[p.severity];
+              summary.addCodeBlock(safe(`${level} | ${location} | ${p.title}`));
+            }
+            await summary.write();
+
   cost:
-    needs: [claude, verdict]
-    # Runs once the verdict is out, including when a newer push cancelled the
-    # run, so cancelled rounds are counted too. A public repository runs it
-    # only for a collector.
+    needs: [claude, opus, verdict]
+    # Runs after the verdict, including when a newer push cancelled the run.
+    # A public repository runs it only for a collector.
     if: >-
       always() &&
       (github.event.repository.private || inputs.otlp_endpoint != '') &&
