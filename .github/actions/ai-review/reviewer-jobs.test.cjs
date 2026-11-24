@@ -16,13 +16,13 @@ const {
 const claudeStep = '- id: claude';
 const prepare = `- id: prepare\n        uses: ${action}\n        with:\n          step: prepare\n          focus: \${{ inputs.focus }}\n`;
 
-test('Sonnet decides the verdict and the opt-in Opus job shares its read-only review steps', () => {
+test('Sonnet decides the verdict and Opus runs beside it with the same read-only steps', () => {
   const jobs = jobsOf(reviewWorkflow());
   const { claude, opus, verdict } = jobs;
   assert.deepEqual(reviewerJobs(jobs), ['claude', 'opus']);
   assert.match(verdict, /\n {4}needs: \[claude\]\n/u);
   assert.match(claude, /\n {4}if: needs\.start\.outputs\.review == 'true'\n/u);
-  assert.match(opus, /\n {4}if: needs\.start\.outputs\.review == 'true' && vars\.AI_REVIEW_COMPARE_OPUS == 'true'\n/u);
+  assert.match(opus, /\n {4}if: needs\.start\.outputs\.review == 'true'\n/u);
   assert.match(opus, /\n {4}continue-on-error: true\n/u);
   assert.match(claude, /\n {4}steps: &claude_steps\n/u);
   assert.match(opus, /\n {4}steps: \*claude_steps\n/u);
@@ -47,7 +47,7 @@ test('each reviewer runs and reports its configured model', () => {
   assert.match(stepText(claude, claudeStep), /\n {12}--model \$\{\{ env\.REVIEW_MODEL \}\}\n/u);
 });
 
-test('the shared steps upload separate structured reviews and fingerprint the prepared inputs during a bake', () => {
+test('the shared steps upload separate structured reviews and fingerprint the prepared inputs', () => {
   const { claude } = jobsOf(reviewWorkflow());
   const upload = stepText(claude, 'actions/upload-artifact@');
   assert.match(upload, /^actions\/upload-artifact@[a-f0-9]{40} # v[\d.]+\n/u);
@@ -60,7 +60,8 @@ test('the shared steps upload separate structured reviews and fingerprint the pr
   // Only input digests and the two usage steps may fail quietly.
   assert.equal(steps.match(/continue-on-error:/gu).length, 3);
   const digest = stepText(claude, '- name: Record review input digests');
-  assert.match(digest, /\n {8}if: vars\.AI_REVIEW_COMPARE_OPUS == 'true'\n {8}continue-on-error: true\n/u);
+  assert.match(digest, /\n {8}continue-on-error: true\n/u);
+  assert.doesNotMatch(digest, /\n {8}if:/u);
   assert.match(digest, /\n {8}working-directory: \$\{\{ steps\.prepare\.outputs\.inputs \}\}\n/u);
   assert.ok(digest.includes(`\n          DIGESTS: ${output}.inputs.sha256\n`));
   assert.match(digest, /sha256sum -- pr\.diff commits\.txt description\.md comments\.jsonl review-comments\.jsonl/u);

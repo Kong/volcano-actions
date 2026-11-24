@@ -106,9 +106,9 @@ any number of reviewers:
 
 ### Compare Sonnet and Opus
 
-Set the calling repository's Actions variable `AI_REVIEW_COMPARE_OPUS` to
-`true` to run Claude Opus 5.5 beside Claude Sonnet 5.5 on each eligible head.
-Callers pinned to a workflow commit need a revision that includes this option.
+Claude Opus 5.5 runs beside Claude Sonnet 5.5 on every eligible head.
+Callers pinned to a workflow commit pick up the comparison when they update
+their pin.
 
 Both jobs use the same policy, schema, and reasoning effort. Sonnet publishes
 the verdict and human review status. Opus saves its structured review for
@@ -116,9 +116,9 @@ comparison and reports usage through the existing cost job when enabled for
 the repository. The caller's automatic move-to-draft step waits for the
 whole workflow, including Opus and cost reporting.
 
-Leave the variable on for at least a week, with enough artifact retention to
-collect the results. For each PR, use the latest completed run with both
-`ai-review-claude` and `ai-review-opus` artifacts and matching input digests.
+Collect at least a week of results after rollout. For each PR, use the
+latest completed run with both review artifacts (`ai-review-claude` and
+`ai-review-opus`) and matching input digests.
 Download a pair with
 `gh run download RUN_ID --name ai-review-claude --name ai-review-opus`.
 The `.inputs.sha256` files reveal intervening edits or comments that would
@@ -126,8 +126,7 @@ make a pair unsuitable for comparison.
 
 Compare findings by location and rationale, severity, and requests for human
 review. Check disagreements against the diff for missed issues and false
-positives. Compare the model costs separately when recorded. Remove the
-variable to end the bake.
+positives. Compare the model costs separately when recorded.
 
 ### Human review
 

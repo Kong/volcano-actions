@@ -54,8 +54,8 @@
 #   the action, so the PR cannot instruct its reviewer or run code on this
 #   runner.
 # - Each reviewer job uploads its structured output as the artifact
-#   `ai-review-<job ID>`. During the Opus comparison, each also records hashes
-#   of its prepared inputs. The verdict job downloads only the required review.
+#   `ai-review-<job ID>` and includes hashes of its prepared inputs. The verdict
+#   job downloads only the required review.
 #   A job output would reach publish through an environment variable, which
 #   holds at most 128 KiB. Missing output leaves the review incomplete.
 # - Statuses are per-SHA, so skipped runs never overwrite a verdict, a failed
@@ -209,7 +209,6 @@ jobs:
       # The two jobs read the PR discussion independently. Digests let a
       # comparison exclude pairs whose inputs changed between checkouts.
       - name: Record review input digests
-        if: vars.AI_REVIEW_COMPARE_OPUS == 'true'
         continue-on-error: true
         working-directory: ${{ steps.prepare.outputs.inputs }}
         env:
@@ -308,7 +307,7 @@ jobs:
   # result is available for comparison and cost, outside the merge gates.
   opus:
     needs: start
-    if: needs.start.outputs.review == 'true' && vars.AI_REVIEW_COMPARE_OPUS == 'true'
+    if: needs.start.outputs.review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true
