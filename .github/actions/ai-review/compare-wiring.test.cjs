@@ -28,11 +28,11 @@ async function comparison(t, { sonnet, opus, opusDigest = 'same input files' }) 
   const checkout = pinnedCheckout(t);
   const dir = tempDir(t, 'ai-review-compare-');
   const entries = {};
-  for (const [job, model, findings, digest] of [
-    ['claude', 'claude-sonnet-5-5', sonnet, 'same input files'],
-    ['opus', 'claude-opus-5-5', opus, opusDigest],
+  for (const [job, findings, digest] of [
+    ['claude', sonnet, 'same input files'],
+    ['opus', opus, opusDigest],
   ]) {
-    entries[job] = { result: 'success', outputs: { model } };
+    entries[job] = { result: 'success' };
     if (findings) fs.writeFileSync(path.join(dir, `ai-review-${job}.json`), reviewJson({ findings }));
     if (digest) fs.writeFileSync(path.join(dir, `ai-review-${job}.inputs.sha256`), digest);
   }
@@ -68,7 +68,7 @@ test('the comparison flags unique Opus findings and shows the counterfactual ver
   ];
   const report = await comparison(t, { sonnet, opus });
   assert.match(report, /Sonnet alone \*\*pass\*\*, combined \*\*fail\*\*/u);
-  assert.match(report, /2 candidate\(s\) reported only by Opus\. Of those, 1 block/u);
+  assert.match(report, /\*\*Opus-only candidates:\*\* 2\. \*\*Blocking:\*\* 1/u);
   assert.match(report, /P1 \| internal\/render\.go:31 \| Missed &lt;bug&gt; \| in render/u);
   assert.match(report, /Deferred P2 \| internal\/setup\.go:12 \| Follow-up/u);
   assert.doesNotMatch(report, /Wrong cache key|Lookup uses a stale key/u);
@@ -84,6 +84,6 @@ test('an unmatched or incomplete pair never produces candidate findings', async 
   ]) {
     const report = await comparison(t, input);
     assert.match(report, /Comparison unavailable\./u);
-    assert.doesNotMatch(report, /candidate\(s\)|combined \*\*fail/u);
+    assert.doesNotMatch(report, /Opus-only candidates|combined \*\*fail/u);
   }
 });

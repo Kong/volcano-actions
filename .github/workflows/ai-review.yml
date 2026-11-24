@@ -105,7 +105,7 @@ on:
         value: ${{ jobs.verdict.outputs.hand-off }}
     secrets:
       anthropic_api_key:
-        description: The Anthropic API key the claude job calls Claude with. Every caller passes it; the claude job fails without it.
+        description: The Anthropic API key both reviewer jobs use. Every caller passes it, and both jobs fail without it.
         required: false
       codex_access_token:
         description: Deprecated compatibility input for older caller workflows.
@@ -314,6 +314,7 @@ jobs:
     outputs:
       reviewer: Claude Opus
       model: ${{ env.REVIEW_MODEL }}
+      candidates: ${{ steps.prepare.outputs.candidates }}
     steps: *claude_steps
 
   verdict:
@@ -387,12 +388,15 @@ jobs:
             const library = path.join(process.env.GITHUB_WORKSPACE, '.github/actions/ai-review');
             const { reviewersOf, parsed, completed, severityOf, cap } = require(path.join(library, 'reviews.cjs'));
             const { problems } = require(path.join(library, 'problems.cjs'));
-            const { claudeModel, claudeOpusModel, severities, failing } = require(path.join(library, 'constants.cjs'));
+            const { severities, failing } = require(path.join(library, 'constants.cjs'));
             const dir = process.env.REVIEW_OUTPUTS;
-            const { reviewers } = reviewersOf(process.env.REVIEWS, dir);
-            const entries = parsed(reviewers).filter((r) => completed(r.result, r.review));
-            const sonnet = entries.find((r) => r.model === claudeModel);
-            const opus = entries.find((r) => r.model === claudeOpusModel);
+            const jobs = JSON.parse(process.env.REVIEWS);
+
+            function reviewOf(job) {
+              const { reviewers } = reviewersOf(JSON.stringify({ [job]: jobs[job] }), dir);
+              const [entry] = parsed(reviewers);
+              return entry && completed(entry.result, entry.review) ? entry.review : null;
+            }
 
             function digest(job) {
               const file = path.join(dir, `ai-review-${job}.inputs.sha256`);
@@ -400,13 +404,15 @@ jobs:
             }
 
             const summary = core.summary.addHeading('Opus-only findings', 2);
+            const sonnet = reviewOf('claude');
+            const opus = reviewOf('opus');
             const sonnetDigest = digest('claude');
             if (!sonnet || !opus || !sonnetDigest || sonnetDigest !== digest('opus')) {
               await summary.addRaw('Comparison unavailable. Both completed reviews must have matching input digests.').write();
               return;
             }
 
-            const shape = (r) => r.review.findings.map((f) => ({
+            const shape = (review) => review.findings.map((f) => ({
               title: cap(String(f.title), 200),
               path: cap(String(f.path), 300),
               line: f.line,
@@ -429,7 +435,7 @@ jobs:
             const sonnetOutcome = sonnetProblems.some(blocks) ? 'fail' : 'pass';
             const combinedOutcome = combined.some(blocks) ? 'fail' : 'pass';
             summary.addRaw(`Findings verdict: Sonnet alone **${sonnetOutcome}**, combined **${combinedOutcome}**.`, true);
-            summary.addRaw(`${opusOnly.length} candidate(s) reported only by Opus. Of those, ${blocking} block the verdict.`, true);
+            summary.addRaw(`**Opus-only candidates:** ${opusOnly.length}. **Blocking:** ${blocking}.`, true);
             summary.addRaw('Matches use the verdict’s title and location rules. Check the candidates against the diff when scoring the comparison.', true);
             const safe = (text) => String(text).replace(/[\r\n]+/gu, ' ')
               .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');

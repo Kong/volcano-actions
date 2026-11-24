@@ -38,9 +38,9 @@ records the count.
 
 ### Reviewers
 
-The `claude` job in `ai-review.yml` runs Claude Sonnet 5.5. The review policy
-and output schema ship with the action as `.github/actions/ai-review/policy.md`
-and `schema.json`.
+In `ai-review.yml`, the `claude` and `opus` jobs run Claude Sonnet 5.5 and
+Claude Opus 5.5. The review policy and output schema ship with the action as
+`.github/actions/ai-review/policy.md` and `schema.json`.
 
 - The action's `prepare` step builds the inputs in a checkout of the base
   branch: the diff, commit messages, and description; the comments the

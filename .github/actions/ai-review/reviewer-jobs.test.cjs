@@ -43,7 +43,11 @@ test('each reviewer runs and reports its configured model', () => {
     model: '${{ env.REVIEW_MODEL }}',
     candidates: '${{ steps.prepare.outputs.candidates }}',
   });
-  assert.deepEqual(outputsOf(opus), { reviewer: 'Claude Opus', model: '${{ env.REVIEW_MODEL }}' });
+  assert.deepEqual(outputsOf(opus), {
+    reviewer: 'Claude Opus',
+    model: '${{ env.REVIEW_MODEL }}',
+    candidates: '${{ steps.prepare.outputs.candidates }}',
+  });
   assert.match(stepText(claude, claudeStep), /\n {12}--model \$\{\{ env\.REVIEW_MODEL \}\}\n/u);
 });
 
