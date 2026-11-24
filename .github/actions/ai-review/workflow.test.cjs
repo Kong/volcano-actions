@@ -19,7 +19,7 @@ const {
   core,
 } = require('./test-helpers.cjs');
 const { tempDir } = require('./test-git.cjs');
-const { reviewWorkflow, action, jobsOf } = require('./test-workflow.cjs');
+const { reviewWorkflow, action, jobsOf, pinnedCheckout } = require('./test-workflow.cjs');
 
 const humanWorkflow = () => readRepo('.github/workflows/ai-review-human.yml');
 const handOffWorkflow = () => readRepo('.github/workflows/ai-review-hand-off.yml');
@@ -37,7 +37,7 @@ test('the review workflows pin one action commit that is on main', () => {
 test('the workflow keeps every reviewer inside its trust boundary', () => {
   const workflow = reviewWorkflow();
   const jobs = jobsOf(workflow);
-  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'opus', 'verdict', 'cost', 'override']);
+  assert.deepEqual(Object.keys(jobs), ['start', 'claude', 'opus', 'verdict', 'compare', 'cost', 'override']);
 
   // Callers choose the trigger; every job that acts runs only under
   // pull_request_target, which runs the caller's base-branch stub.
@@ -188,11 +188,7 @@ test('the reusable workflows and composite action pin every action to a full com
 
 // Loads the action at the workflows' pin, which can trail this checkout's.
 function pinnedAction(t) {
-  const dir = tempDir(t, 'ai-review-pinned-');
-  const archive = path.join(dir, 'pinned.tar');
-  execFileSync('git', ['archive', '--output', archive, action.split('@')[1]], { cwd: root });
-  execFileSync('tar', ['-xf', archive, '-C', dir]);
-  const at = path.join(dir, '.github/actions/ai-review');
+  const at = path.join(pinnedCheckout(t), '.github/actions/ai-review');
   return {
     pinned: require(path.join(at, 'ai-review.cjs')),
     schema: JSON.parse(fs.readFileSync(path.join(at, 'schema.json'))),
@@ -239,22 +235,24 @@ test('the pinned action matches its schema and the documented override policy', 
   assert.deepEqual(decide(true).reviewer, { login: 'bob', why: 'wrote billing' });
 });
 
-// The publish action must ignore comparison data even if it sees the file.
-test('the pinned action publishes the Sonnet review and ignores an Opus finding', async (t) => {
+test('the pinned action fails the combined verdict when only Opus reports a blocking finding', async (t) => {
   const { pinned } = pinnedAction(t);
   const dir = tempDir(t, 'ai-review-outputs-');
   const sonnet = finding('p3', { title: 'Sonnet', path: 'internal/example.go' });
-  const opus = finding('p1', { title: 'Opus', path: 'internal/example.go' });
+  const opus = finding('p1', { title: 'Opus', path: 'internal/other.go' });
   fs.writeFileSync(path.join(dir, 'ai-review-claude.json'), reviewJson({ findings: [sonnet] }));
   fs.writeFileSync(path.join(dir, 'ai-review-opus.json'), reviewJson({ findings: [opus] }));
   clearAfter(t, 'REVIEWS', 'REVIEW_OUTPUTS');
-  process.env.REVIEWS = JSON.stringify({ claude: { result: 'success', outputs: { reviewer: 'Claude' } } });
+  process.env.REVIEWS = JSON.stringify({
+    claude: { result: 'success', outputs: { reviewer: 'Claude Sonnet', model: 'claude-sonnet-5-5' } },
+    opus: { result: 'success', outputs: { reviewer: 'Claude Opus', model: 'claude-opus-5-5' } },
+  });
   process.env.REVIEW_OUTPUTS = dir;
   const c = client();
   const k = core();
   await pinned.publish({ github: c.github, context: context(), core: k });
   assert.deepEqual(k.warnings, []);
-  assert.deepEqual(c.set(statusContext), [[sha, 'success', 'No P0-P2 findings (1 P3, 0 pre-existing).']]);
+  assert.deepEqual(c.set(statusContext), [[sha, 'failure', '1 P0-P2 finding(s). See the AI review comment.']]);
 });
 
 // Reviews run the PR's own copy of their workflow, so the gate runs only from

@@ -2,7 +2,10 @@
 
 // Reads the review workflows for the ai-review workflow tests.
 
-const { readRepo } = require('./test-helpers.cjs');
+const { execFileSync } = require('node:child_process');
+const path = require('node:path');
+const { readRepo, root } = require('./test-helpers.cjs');
+const { tempDir } = require('./test-git.cjs');
 
 const reviewWorkflow = () => readRepo('.github/workflows/ai-review.yml');
 // The pinned action every job of the review workflows runs.
@@ -34,4 +37,25 @@ const reviewerJobs = (jobs) => Object.keys(jobs).filter((name) => Object.hasOwn(
 
 const modelOf = (job) => job.match(/\n {6}REVIEW_MODEL: (\S+)\n/u)?.[1];
 
-module.exports = { reviewWorkflow, action, jobsOf, stepsOf, stepText, outputsOf, reviewerJobs, modelOf };
+// Use the immutable action the workflow will actually load.
+function pinnedCheckout(t) {
+  const dir = tempDir(t, 'ai-review-pinned-');
+  const archive = path.join(dir, 'pinned.tar');
+  execFileSync('git', ['archive', '--output', archive, action.split('@')[1], '.github/actions/ai-review'], {
+    cwd: root,
+  });
+  execFileSync('tar', ['-xf', archive, '-C', dir]);
+  return dir;
+}
+
+module.exports = {
+  reviewWorkflow,
+  action,
+  jobsOf,
+  stepsOf,
+  stepText,
+  outputsOf,
+  reviewerJobs,
+  modelOf,
+  pinnedCheckout,
+};

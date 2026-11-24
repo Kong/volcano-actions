@@ -16,14 +16,14 @@ const {
 const claudeStep = '- id: claude';
 const prepare = `- id: prepare\n        uses: ${action}\n        with:\n          step: prepare\n          focus: \${{ inputs.focus }}\n`;
 
-test('Sonnet decides the verdict and Opus runs beside it with the same read-only steps', () => {
+test('both reviewers run the same read-only steps and feed the verdict', () => {
   const jobs = jobsOf(reviewWorkflow());
   const { claude, opus, verdict } = jobs;
   assert.deepEqual(reviewerJobs(jobs), ['claude', 'opus']);
-  assert.match(verdict, /\n {4}needs: \[claude\]\n/u);
+  assert.match(verdict, /\n {4}needs: \[claude, opus\]\n/u);
   assert.match(claude, /\n {4}if: needs\.start\.outputs\.review == 'true'\n/u);
   assert.match(opus, /\n {4}if: needs\.start\.outputs\.review == 'true'\n/u);
-  assert.match(opus, /\n {4}continue-on-error: true\n/u);
+  assert.doesNotMatch(opus, /\n {4}continue-on-error:/u);
   assert.match(claude, /\n {4}steps: &claude_steps\n/u);
   assert.match(opus, /\n {4}steps: \*claude_steps\n/u);
   assert.match(
@@ -39,7 +39,7 @@ test('each reviewer runs and reports its configured model', () => {
   assert.equal(modelOf(claude), 'claude-sonnet-5-5');
   assert.equal(modelOf(opus), 'claude-opus-5-5');
   assert.deepEqual(outputsOf(claude), {
-    reviewer: 'Claude',
+    reviewer: 'Claude Sonnet',
     model: '${{ env.REVIEW_MODEL }}',
     candidates: '${{ steps.prepare.outputs.candidates }}',
   });
@@ -117,7 +117,7 @@ test('a hung review step fails before its job times out', () => {
   }
 });
 
-test('the verdict downloads the required review after Sonnet finishes', () => {
+test("the verdict downloads both reviewers' output once their jobs end", () => {
   const job = jobsOf(reviewWorkflow()).verdict;
   assert.match(
     job,
@@ -133,7 +133,8 @@ test('the verdict downloads the required review after Sonnet finishes', () => {
   for (const line of [
     'timeout-minutes: 2',
     'continue-on-error: true',
-    '  name: ai-review-claude',
+    '  pattern: ai-review-{claude,opus}',
+    '  merge-multiple: true',
     `  path: ${outputs}`,
   ]) {
     assert.ok(download.includes(`\n        ${line}\n`) || download.endsWith(`\n        ${line}`), line);

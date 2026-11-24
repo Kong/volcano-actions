@@ -54,22 +54,23 @@ and `schema.json`.
   its verdict, and its own hardening. Claude reads the checkouts with no shell.
   No reviewer job holds a write token. The verdict job posts the comments.
 
-The verdict and its summary use the Sonnet review. The summary comment
-names no model.
+The verdict and its summary combine the reviews that completed. Either
+reviewer can ask for human review. The summary comment names no model.
 
 - A P0-P2 finding fails the verdict, unless it is a P2 the author deferred
-  (see below). The Sonnet review can ask for a person.
-- The comment lists and counts each problem once, by title. Each finding on
-  a line, except a deferred P2, also gets an inline comment that explains why
-  it matters and names the model that found it.
+  (see below).
+- The comment groups findings with similar titles or nearby lines in the
+  same file into one problem at the highest severity reported. Each finding
+  on a line, except a deferred P2, gets an inline comment naming its model.
 - Each round sees how people answered the last one. A P2 finding the PR
   author defers to named follow-up work, or declines with a concrete reason,
   in the description or a comment, is listed for a person to decide instead
   of failing the verdict again, unless the code has since made it worse. P0
   and P1 findings still fail. Such a verdict passes only once the summary
   comment records the deferral, which the human review reads back.
-- When the Sonnet review fails or its output is unreadable, the verdict is
-  an error and the head waits for a person, as described below.
+- When one review fails or its output is unreadable, the verdict uses the
+  completed review and reports the missing coverage. When neither completes,
+  the verdict is an error and the head waits for a person.
 
 To add a reviewer whose findings should affect the verdict, change the
 workflow and the cost tables:
@@ -103,23 +104,22 @@ Claude Opus 5.5 runs beside Claude Sonnet 5.5 on every eligible head.
 Callers using `@main` receive the comparison when this workflow lands on
 `main`. Callers using a workflow commit pick it up when they update their pin.
 
-Both jobs use the same policy, schema, and reasoning effort. Sonnet publishes
-the verdict and human review status. Opus saves its structured review for
-comparison and reports usage through the existing cost job when enabled for
-the repository. The caller's automatic move-to-draft step waits for the
-whole workflow, including Opus and cost reporting.
+Both jobs use the same policy, schema, and reasoning effort. Both feed the
+verdict and human review status. The caller's automatic move-to-draft step
+waits for the whole workflow.
 
-Collect at least a week of results after rollout. For each PR, use the
-latest completed run with both review artifacts (`ai-review-claude` and
-`ai-review-opus`) and matching input digests.
-Download a pair with
+Open **Run log** from the PR's review summary and look for **Opus-only
+findings** on the workflow run summary. It flags problems the grouping rules
+associate only with Opus, shows which block the verdict, and shows whether
+Sonnet alone would have passed the findings gate. The comparison needs both
+completed reviews and matching input digests, since intervening edits or
+comments can change what each model sees.
+
+After at least a week, use the latest matched run for each PR and check the
+flagged findings against its diff. Download the full reviews for a comparison
+of rationale, severity, and human review requests with
 `gh run download RUN_ID --name ai-review-claude --name ai-review-opus`.
-The `.inputs.sha256` files reveal intervening edits or comments that would
-make a pair unsuitable for comparison.
-
-Compare findings by location and rationale, severity, and requests for human
-review. Check disagreements against the diff for missed issues and false
-positives. Compare the model costs separately when recorded.
+Compare the model costs separately when recorded.
 
 ### Human review
 

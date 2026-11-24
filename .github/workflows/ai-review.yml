@@ -1,7 +1,7 @@
 # Reusable AI review for Volcano repositories. Each repository calls it from a
 # pull_request_target workflow (see README.md). Sonnet and Opus review each
-# eligible head of a same-repository PR. The Sonnet review drives the
-# `ai-review/verdict` commit status. Opus records a comparison. Findings are ranked
+# eligible head of a same-repository PR. One `ai-review/verdict` commit status
+# combines the reviews that complete. Findings are ranked
 # P0-P3. A P0-P2 finding fails the verdict unless it is a P2 the author
 # deferred. The workflow also reports `ai-review/human`,
 # which waits for a person's approval when a reviewer, a deferral, a reserved
@@ -10,7 +10,7 @@
 # can drop its required approvals. When it waits, the review asks one
 # collaborator by name: the first reviewer's pick among those with recent
 # history in the changed files. ai-review-human.yml re-sets it when reviews or
-# that label change. When the Sonnet review fails, the verdict is an error
+# that label change. When neither review completes, the verdict is an error
 # and the head waits for a person. When start skips the head or fails,
 # the run publishes no verdict.
 #
@@ -32,7 +32,7 @@
 #   reviewer ranks the problem rather than the gate. Likewise it defines when a
 #   person is needed by the change, never by what that decision lets the PR
 #   skip. Each reviewer job adds only how its provider reads and returns its
-#   verdict. The verdict job posts the Sonnet review's comments.
+#   verdict. The verdict job posts both reviewers' comments.
 # - pull_request_target runs as the caller's base branch, which supplies the
 #   stub and the credential secrets it passes. Every job skips on any other
 #   trigger.
@@ -53,8 +53,8 @@
 #   the action, so the PR cannot instruct its reviewer or run code on this
 #   runner.
 # - Each reviewer job uploads its structured output as the artifact
-#   `ai-review-<job ID>` and includes hashes of its prepared inputs. The verdict
-#   job downloads only the required review.
+#   `ai-review-<job ID>` and includes hashes of its prepared inputs. The
+#   comparison job uses the hashes to identify matched pairs.
 #   A job output would reach publish through an environment variable, which
 #   holds at most 128 KiB. Missing output leaves the review incomplete.
 # - Statuses are per-SHA, so skipped runs never overwrite a verdict, a failed
@@ -169,7 +169,7 @@ jobs:
     env:
       REVIEW_MODEL: claude-sonnet-5-5
     outputs:
-      reviewer: Claude
+      reviewer: Claude Sonnet
       # The verdict job names it in the footer of each inline comment.
       model: ${{ env.REVIEW_MODEL }}
       candidates: ${{ steps.prepare.outputs.candidates }}
@@ -177,7 +177,7 @@ jobs:
       # A required secret that is unset fails the run before start, which
       # leaves the head with no verdict that an approval or override could
       # clear. A missing credential fails at this step so the verdict can
-      # publish an error after a failed Sonnet review.
+      # publish an error if neither review completes.
       - name: Require the credential
         env:
           KEY_SET: ${{ secrets.anthropic_api_key != '' }}
@@ -302,14 +302,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  # Reuses the same policy, setup and effort with a different model. Its
-  # result is available for comparison and cost, outside the merge gates.
+  # Reuses the same policy, setup and effort with a different model.
   opus:
     needs: start
     if: needs.start.outputs.review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: true
     permissions: *claude_permissions
     env:
       REVIEW_MODEL: claude-opus-5-5
@@ -319,8 +317,8 @@ jobs:
     steps: *claude_steps
 
   verdict:
-    needs: [claude]
-    # Runs once the required reviewer ends. A job-level `if` also sees start's
+    needs: [claude, opus]
+    # Runs once both reviewers end. A job-level `if` also sees start's
     # result in `needs`, so this passes whenever start succeeded or failed.
     # publish sets nothing when every reviewer was skipped or cancelled: a
     # draft gets no verdict, and a cancelled run, or a start that failed after
@@ -341,7 +339,8 @@ jobs:
         timeout-minutes: 2
         continue-on-error: true
         with:
-          name: ai-review-claude
+          pattern: ai-review-{claude,opus}
+          merge-multiple: true
           path: ${{ runner.temp }}/ai-review-outputs
       # This job has a write token. Never check out the PR.
       - id: publish
@@ -353,10 +352,99 @@ jobs:
           human-review-paths: ${{ inputs.human_review_paths }}
           hand-off: ${{ inputs.hand_off && 'job' || '' }}
 
+  compare:
+    needs: [claude, opus]
+    if: needs.claude.result == 'success' && needs.opus.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      # Use the same trusted grouping rules as the verdict. This is the
+      # action repository at the action pin, never the caller or the PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Kong/volcano-actions
+          ref: 5d147443f51b7796515d068fa353fdaa71e4bb18
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          pattern: ai-review-{claude,opus}
+          merge-multiple: true
+          path: ${{ runner.temp }}/ai-review-outputs
+      - name: Flag Opus-only findings
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          REVIEW_OUTPUTS: ${{ runner.temp }}/ai-review-outputs
+          REVIEWS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const library = path.join(process.env.GITHUB_WORKSPACE, '.github/actions/ai-review');
+            const { reviewersOf, parsed, completed, severityOf, cap } = require(path.join(library, 'reviews.cjs'));
+            const { problems } = require(path.join(library, 'problems.cjs'));
+            const { claudeModel, claudeOpusModel, severities, failing } = require(path.join(library, 'constants.cjs'));
+            const dir = process.env.REVIEW_OUTPUTS;
+            const { reviewers } = reviewersOf(process.env.REVIEWS, dir);
+            const entries = parsed(reviewers).filter((r) => completed(r.result, r.review));
+            const sonnet = entries.find((r) => r.model === claudeModel);
+            const opus = entries.find((r) => r.model === claudeOpusModel);
+
+            function digest(job) {
+              const file = path.join(dir, `ai-review-${job}.inputs.sha256`);
+              return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+            }
+
+            const summary = core.summary.addHeading('Opus-only findings', 2);
+            const sonnetDigest = digest('claude');
+            if (!sonnet || !opus || !sonnetDigest || sonnetDigest !== digest('opus')) {
+              await summary.addRaw('Comparison unavailable. Both completed reviews must have matching input digests.').write();
+              return;
+            }
+
+            const shape = (r) => r.review.findings.map((f) => ({
+              title: cap(String(f.title), 200),
+              path: cap(String(f.path), 300),
+              line: f.line,
+              severity: severityOf(f),
+              deferred: f.deferred === true,
+            }));
+            const sonnetFindings = shape(sonnet);
+            const opusFindings = shape(opus);
+            const opusKeys = new Set(problems([opusFindings]).map((p) => p.key));
+            const sonnetProblems = problems([sonnetFindings]);
+            const sonnetKeys = new Set(sonnetProblems.map((p) => p.key));
+            const combined = problems([sonnetFindings, opusFindings]);
+            // Group keys join sorted singleton keys with ' | '. Exclude any
+            // ambiguous key because titles and file paths may contain ' | '.
+            const pairs = new Set([...opusKeys].flatMap((o) =>
+              [...sonnetKeys].map((s) => [o, s].sort().join(' | '))));
+            const opusOnly = combined.filter((p) => opusKeys.has(p.key) && !sonnetKeys.has(p.key) && !pairs.has(p.key));
+            const blocks = (p) => failing.has(p.severity) && !p.deferred;
+            const blocking = opusOnly.filter(blocks).length;
+            const sonnetOutcome = sonnetProblems.some(blocks) ? 'fail' : 'pass';
+            const combinedOutcome = combined.some(blocks) ? 'fail' : 'pass';
+            summary.addRaw(`Findings verdict: Sonnet alone **${sonnetOutcome}**, combined **${combinedOutcome}**.`, true);
+            summary.addRaw(`${opusOnly.length} candidate(s) reported only by Opus. Of those, ${blocking} block the verdict.`, true);
+            summary.addRaw('Matches use the verdict’s title and location rules. Check the candidates against the diff when scoring the comparison.', true);
+            const safe = (text) => String(text).replace(/[\r\n]+/gu, ' ')
+              .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+            for (const p of opusOnly) {
+              const { path: file, lines } = p.at[0];
+              const location = lines.length > 0 ? `${file}:${lines.join(',')}` : file;
+              const level = p.deferred ? 'Deferred P2' : severities[p.severity];
+              summary.addCodeBlock(safe(`${level} | ${location} | ${p.title}`));
+            }
+            await summary.write();
+
   cost:
     needs: [claude, opus, verdict]
-    # Runs after the verdict and the comparison, including when a newer push
-    # cancelled the run. A public repository runs it only for a collector.
+    # Runs after the verdict, including when a newer push cancelled the run.
+    # A public repository runs it only for a collector.
     if: >-
       always() &&
       (github.event.repository.private || inputs.otlp_endpoint != '') &&
