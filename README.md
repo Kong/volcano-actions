@@ -107,8 +107,8 @@ any number of reviewers:
 ### Compare Sonnet and Opus
 
 Claude Opus 5.5 runs beside Claude Sonnet 5.5 on every eligible head.
-Callers pinned to a workflow commit pick up the comparison when they update
-their pin.
+Callers using `@main` receive the comparison when this workflow lands on
+`main`. Callers using a workflow commit pick it up when they update their pin.
 
 Both jobs use the same policy, schema, and reasoning effort. Sonnet publishes
 the verdict and human review status. Opus saves its structured review for
