@@ -1,7 +1,7 @@
 # Reusable AI review for Volcano repositories. Each repository calls it from a
-# pull_request_target workflow (see README.md). Each reviewer job below reviews
-# every push to a same-repository PR, and one verdict combines them as the
-# `ai-review/verdict` commit status on the reviewed head. Findings are ranked
+# pull_request_target workflow (see README.md). Sonnet and Opus review each
+# eligible head of a same-repository PR. The Sonnet review drives the
+# `ai-review/verdict` commit status. Opus records a comparison. Findings are ranked
 # P0-P3. A P0-P2 finding fails the verdict unless it is a P2 the author
 # deferred. The workflow also reports `ai-review/human`,
 # which waits for a person's approval when a reviewer, a deferral, a reserved
@@ -10,10 +10,9 @@
 # can drop its required approvals. When it waits, the review asks one
 # collaborator by name: the first reviewer's pick among those with recent
 # history in the changed files. ai-review-human.yml re-sets it when reviews or
-# that label change. Reviewers that do not complete leave the verdict to those
-# that did; when none does, the verdict is an error and the head waits for a
-# person. A run that reviews nothing, because start skipped the head or
-# failed, publishes no verdict.
+# that label change. When the Sonnet review fails, the verdict is an error
+# and the head waits for a person. When start skips the head or fails,
+# the run publishes no verdict.
 #
 # After three failing rounds in a row since the PR was last marked ready for
 # review, the review hands the PR back: it moves the PR to draft, which start
@@ -33,7 +32,7 @@
 #   reviewer ranks the problem rather than the gate. Likewise it defines when a
 #   person is needed by the change, never by what that decision lets the PR
 #   skip. Each reviewer job adds only how its provider reads and returns its
-#   verdict; the verdict job posts every reviewer's comments.
+#   verdict. The verdict job posts the Sonnet review's comments.
 # - pull_request_target runs as the caller's base branch, which supplies the
 #   stub and the credential secrets it passes. Every job skips on any other
 #   trigger.
@@ -177,8 +176,8 @@ jobs:
     steps: &claude_steps
       # A required secret that is unset fails the run before start, which
       # leaves the head with no verdict that an approval or override could
-      # clear. Failing here leaves the verdict to the other reviewers, or makes
-      # it an error when none completes.
+      # clear. A missing credential fails at this step so the verdict can
+      # publish an error after a failed Sonnet review.
       - name: Require the credential
         env:
           KEY_SET: ${{ secrets.anthropic_api_key != '' }}

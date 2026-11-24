@@ -54,32 +54,25 @@ and `schema.json`.
   its verdict, and its own hardening. Claude reads the checkouts with no shell.
   No reviewer job holds a write token. The verdict job posts the comments.
 
-One verdict combines every reviewer, and the summary comment reads as a
-single review that names no reviewer or provider, however many ran:
+The verdict and its summary use the Sonnet review. The summary comment
+names no model.
 
-- A P0-P2 finding from any reviewer fails it, unless it is a P2 the author
-  deferred (see below). Any reviewer can ask for a person.
-- The comment lists and counts each problem once, by title. Findings from
-  different reviewers with nearly the same title, or else within 20 lines of
-  each other in one file, are one problem, shown at the most severe level any
-  reviewer gave it, with every location and the other reviewers' titles. One
-  reviewer's findings stay as it wrote them. Each finding on a line, except a
-  deferred P2, also gets an inline comment that explains why it matters, with
-  a footer naming the model that found it, so two models reporting the same
-  problem leave two comments.
+- A P0-P2 finding fails the verdict, unless it is a P2 the author deferred
+  (see below). The Sonnet review can ask for a person.
+- The comment lists and counts each problem once, by title. Each finding on
+  a line, except a deferred P2, also gets an inline comment that explains why
+  it matters and names the model that found it.
 - Each round sees how people answered the last one. A P2 finding the PR
   author defers to named follow-up work, or declines with a concrete reason,
   in the description or a comment, is listed for a person to decide instead
   of failing the verdict again, unless the code has since made it worse. P0
   and P1 findings still fail. Such a verdict passes only once the summary
   comment records the deferral, which the human review reads back.
-- When a provider has an outage or its review otherwise does not complete, the
-  other reviewers' verdict stands, and the run log warns which one is missing.
-  When none completes, the verdict is an error and the head waits for a
-  person, as described below.
+- When the Sonnet review fails or its output is unreadable, the verdict is
+  an error and the head waits for a person, as described below.
 
-To add a provider, change the workflow and the cost tables; the verdict reads
-any number of reviewers:
+To add a reviewer whose findings should affect the verdict, change the
+workflow and the cost tables:
 
 1. Add a job to `ai-review.yml` like `claude`. It requires its credential,
    refuses bots outside `allowed_bots` (start leaves bots to the reviewers),
